@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 import dns.resolver
 
-APP_VERSION = "2.0"
+APP_VERSION = "2.0.1"
 
 # Setup Paths
 BASE_DIR = Path(__file__).resolve().parent

@@ -3,6 +3,7 @@
 # ==========================================
 import sys
 import csv
+import logging  # <-- THE FIX: Imported logging
 import concurrent.futures
 from datetime import datetime
 from pathlib import Path
