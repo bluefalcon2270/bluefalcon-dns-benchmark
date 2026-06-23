@@ -2,11 +2,9 @@
 # BlueFalcon DNS Benchmark Pro - GUI Module
 # ==========================================
 import sys
-import csv
 import logging
 import queue
 import concurrent.futures
-from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -165,18 +163,21 @@ class BenchmarkWorker(QThread):
         self.max_workers = workers
         self.result_queue = result_queue
         self._is_running = True
+        self.exe = None
 
     def run(self):
         logger.info(f"Initializing standard concurrent lookup mapping thread architecture.")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as exe:
-            future_map = {}
-            for d in self.dns_list:
-                for dom in self.domains:
-                    if not self._is_running:
-                        break
-                    f = exe.submit(NetworkUtils.test_dns_domain, d["ip"], dom, self.timeout)
-                    future_map[f] = (d["row_id"], dom)
+        self.exe = concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers)
+        future_map = {}
+        
+        for d in self.dns_list:
+            for dom in self.domains:
+                if not self._is_running:
+                    break
+                f = self.exe.submit(NetworkUtils.test_dns_domain, d["ip"], dom, self.timeout)
+                future_map[f] = (d["row_id"], dom)
 
+        try:
             for future in concurrent.futures.as_completed(future_map):
                 if not self._is_running:
                     break
@@ -186,12 +187,20 @@ class BenchmarkWorker(QThread):
                     self.result_queue.put((row_id, domain, success, text, t_val))
                 except Exception:
                     self.result_queue.put((row_id, domain, False, "Err", 0))
-
-        self.result_queue.put("DONE")
-        self.finished_scan.emit()
+        except Exception as e:
+            logger.error(f"Worker iteration exception: {e}")
+        finally:
+            if self.exe:
+                # Cancel pending unstarted threads immediately 
+                self.exe.shutdown(wait=False, cancel_futures=True)
+            self.result_queue.put("DONE")
+            self.finished_scan.emit()
 
     def stop(self):
         self._is_running = False
+        if self.exe:
+            # Force threadpool to dump queue instantly on abort
+            self.exe.shutdown(wait=False, cancel_futures=True)
 
 class AddDNSDialog(QDialog):
     def __init__(self, parent=None):
@@ -367,7 +376,7 @@ class PreferencesWindow(QDialog):
         g.addWidget(self.input_timeout, 0, 1)
 
         g.addWidget(QLabel("Thread Worker Limit:"), 1, 0)
-        self.input_threads = QLineEdit(str(self.parent_app.current_workers if self.parent_app else 1000))
+        self.input_threads = QLineEdit(str(self.parent_app.current_workers if self.parent_app else 100))
         self.input_threads.setValidator(QIntValidator(1, 5000))
         g.addWidget(self.input_threads, 1, 1)
 
@@ -439,7 +448,7 @@ class ModernDNSApp(QMainWindow):
             QMessageBox.warning(self, "Offline", "No active internet connection detected. Proceed with caution.")
 
         self.current_timeout = 5.0
-        self.current_workers = 1000
+        self.current_workers = 100
         self.active_profiles = []
         self.config_data = {}
         self.system_dns = NetworkUtils.get_system_dns()
@@ -631,25 +640,16 @@ class ModernDNSApp(QMainWindow):
     def toggle_scan(self):
         if self.is_scanning:
             self.is_scanning = False
-            self.lbl_status.setText("Aborting immediately...")
+            self.lbl_status.setText("Aborting...")
             self.set_progress_state("aborted")
+            
+            # Disable Start button until background thread completes cleanup
+            self.btn_start.setEnabled(False)
+            self.btn_start.setText("Stopping...")
             
             if self.worker:
                 self.worker.stop()
                 
-            self.queue_timer.stop()
-            
-            # Immediately purge hanging values out of the queue to drop resource overhead
-            while not self.result_queue.empty():
-                try: self.result_queue.get_nowait()
-                except queue.Empty: break
-                    
-            self.btn_start.setEnabled(True)
-            self.btn_start.setText("🚀 Start Benchmark")
-            self.btn_start.setObjectName("")
-            self.btn_start.setStyleSheet("")
-            self.combo_net.setEnabled(True)
-            self.combo_profile_main.setEnabled(True)
             return
 
         if not self.dns_list or not self.domains:
@@ -673,10 +673,7 @@ class ModernDNSApp(QMainWindow):
         self.lbl_status.setText("Benchmarking...")
         self.lbl_status.setStyleSheet(f"color: {C_PRIMARY}; font-weight: bold;")
 
-        while not self.result_queue.empty():
-            try: self.result_queue.get_nowait()
-            except queue.Empty: break
-
+        self.result_queue.queue.clear()
         self.worker = BenchmarkWorker(self.dns_list, self.domains, self.current_timeout, self.current_workers, self.result_queue)
         self.worker.finished_scan.connect(self.scan_finished)
         self.worker.start()
@@ -757,39 +754,21 @@ class ModernDNSApp(QMainWindow):
         self.combo_net.setEnabled(True)
         self.combo_profile_main.setEnabled(True)
         
-        if self.is_scanning:
-            self.is_scanning = False
-            self.btn_start.setText("🚀 Start Benchmark")
-            self.btn_start.setObjectName("")
-            self.btn_start.setStyleSheet("")
-            
+        self.btn_start.setText("🚀 Start Benchmark")
+        self.btn_start.setObjectName("")
+        self.btn_start.setStyleSheet("")
+        
+        # Differentiate between a natural finish and an aborted run
+        if not self.is_scanning and "Aborting" in self.lbl_status.text():
+            self.lbl_status.setText("Scan Aborted.")
+            self.lbl_status.setStyleSheet(f"color: {C_ERROR}; font-weight: bold; font-size: 13px;")
+        else:
             self.set_progress_state("success")
-            self.lbl_status.setText("Scan Complete. Saving...")
+            self.lbl_status.setText("Scan Complete.")
             self.lbl_status.setStyleSheet(f"color: {C_SUCCESS}; font-weight: bold; font-size: 13px;")
-            self._save_to_history()
-            self.lbl_status.setText("Scan Complete & Saved.")
-
-    def _save_to_history(self):
-        network = self.combo_net.currentText()
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        file_exists = (BASE_DIR / "benchmark_history.csv").exists()
-
-        try:
-            with open(BASE_DIR / "benchmark_history.csv", mode='a', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                if not file_exists:
-                    writer.writerow(["Timestamp", "Network", "DNS_IP", "DNS_Name", "Errors", "Avg_Ping_ms"])
-
-                for row_idx, info in enumerate(self.dns_list):
-                    err_item = self.table.item(row_idx, 2)
-                    ping_item = self.table.item(row_idx, 1)
-                    
-                    err_val = int(err_item.text()) if err_item and err_item.text().isdigit() else len(self.domains)
-                    ping_val = int(ping_item.text().replace(" ms", "")) if ping_item and "ms" in ping_item.text() else -1
-                    
-                    writer.writerow([timestamp, network, info["ip"], info["name"], err_val, ping_val])
-        except Exception as e:
-            logger.error(f"Failed to append to global spreadsheet data: {e}")
+            
+        self.is_scanning = False
+        logger.info("Benchmark cycle ended.")
 
     def sort_results(self):
         if not self.results_data or (self.worker and self.worker.isRunning()):

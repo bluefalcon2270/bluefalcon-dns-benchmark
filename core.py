@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 import dns.resolver
 
-APP_VERSION = "2.3"
+APP_VERSION = "2.4"
 
 # Setup Paths - Force CWD so files are always created next to the execution context
 BASE_DIR = Path.cwd()
