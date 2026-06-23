@@ -19,6 +19,14 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 def main():
     sys.excepthook = handle_exception
     
+    # Critical: Enforce Windows Native Taskbar Grouping Override BEFORE Qt Application Boot
+    if platform.system() == "Windows":
+        try:
+            myappid = f"bluefalcon.dnsbenchmark.pro.v{APP_VERSION}"
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception:
+            pass
+
     app = QApplication(sys.argv)
     
     icon_path = AppUtils.get_resource_path("icon.ico")
@@ -34,12 +42,6 @@ def main():
         msg.setText("BlueFalcon DNS Benchmark Pro is engineered exclusively for Windows 10/11 platforms.")
         msg.exec()
         sys.exit(1)
-
-    try:
-        myappid = f"bluefalcon.dnsbenchmark.pro.v{APP_VERSION}"
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-    except Exception:
-        pass
 
     try:
         window = ModernDNSApp()

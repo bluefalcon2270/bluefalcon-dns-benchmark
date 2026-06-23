@@ -437,10 +437,6 @@ class ModernDNSApp(QMainWindow):
         self.setWindowTitle(f"BlueFalcon DNS Benchmark Pro v{APP_VERSION}")
         self.setMinimumSize(1050, 700)
         
-        icon_path = AppUtils.get_resource_path("icon.ico")
-        if icon_path.exists():
-            self.setWindowIcon(QIcon(str(icon_path)))
-        
         if not AppUtils.is_admin():
             logger.warning("Application launched without Administrator privileges. Some WMI queries may fail.")
         if not AppUtils.check_internet_connection():
@@ -640,16 +636,27 @@ class ModernDNSApp(QMainWindow):
     def toggle_scan(self):
         if self.is_scanning:
             self.is_scanning = False
-            self.lbl_status.setText("Aborting...")
+            self.lbl_status.setText("Aborting immediately...")
             self.set_progress_state("aborted")
             
-            # Disable Start button until background thread completes cleanup
             self.btn_start.setEnabled(False)
             self.btn_start.setText("Stopping...")
             
             if self.worker:
                 self.worker.stop()
                 
+            self.queue_timer.stop()
+            
+            while not self.result_queue.empty():
+                try: self.result_queue.get_nowait()
+                except queue.Empty: break
+                    
+            self.btn_start.setEnabled(True)
+            self.btn_start.setText("🚀 Start Benchmark")
+            self.btn_start.setObjectName("")
+            self.btn_start.setStyleSheet("")
+            self.combo_net.setEnabled(True)
+            self.combo_profile_main.setEnabled(True)
             return
 
         if not self.dns_list or not self.domains:
@@ -673,7 +680,10 @@ class ModernDNSApp(QMainWindow):
         self.lbl_status.setText("Benchmarking...")
         self.lbl_status.setStyleSheet(f"color: {C_PRIMARY}; font-weight: bold;")
 
-        self.result_queue.queue.clear()
+        while not self.result_queue.empty():
+            try: self.result_queue.get_nowait()
+            except queue.Empty: break
+
         self.worker = BenchmarkWorker(self.dns_list, self.domains, self.current_timeout, self.current_workers, self.result_queue)
         self.worker.finished_scan.connect(self.scan_finished)
         self.worker.start()
@@ -703,8 +713,15 @@ class ModernDNSApp(QMainWindow):
         self.recalculate_row_metrics(row_idx, row_id)
 
     def process_queue(self):
+        if self.result_queue.empty():
+            return
+            
         processed = 0
-        while not self.result_queue.empty() and processed < 75:
+        
+        # Pausing graphical updates during batched injection completely mitigates UI stutter
+        self.table.setUpdatesEnabled(False)
+        
+        while not self.result_queue.empty() and processed < 150:
             try:
                 item = self.result_queue.get_nowait()
                 if item == "DONE":
@@ -713,6 +730,8 @@ class ModernDNSApp(QMainWindow):
             except queue.Empty:
                 break
             processed += 1
+            
+        self.table.setUpdatesEnabled(True)
 
     def recalculate_row_metrics(self, row_idx, row_id):
         if row_id not in self.results_data: return
@@ -742,6 +761,7 @@ class ModernDNSApp(QMainWindow):
     def scan_finished(self):
         self.queue_timer.stop()
         
+        self.table.setUpdatesEnabled(False)
         while not self.result_queue.empty():
             try:
                 item = self.result_queue.get_nowait()
@@ -749,25 +769,22 @@ class ModernDNSApp(QMainWindow):
                     self._process_single_result(item)
             except queue.Empty:
                 break
+        self.table.setUpdatesEnabled(True)
 
         self.btn_start.setEnabled(True)
         self.combo_net.setEnabled(True)
         self.combo_profile_main.setEnabled(True)
         
-        self.btn_start.setText("🚀 Start Benchmark")
-        self.btn_start.setObjectName("")
-        self.btn_start.setStyleSheet("")
-        
-        # Differentiate between a natural finish and an aborted run
-        if not self.is_scanning and "Aborting" in self.lbl_status.text():
-            self.lbl_status.setText("Scan Aborted.")
-            self.lbl_status.setStyleSheet(f"color: {C_ERROR}; font-weight: bold; font-size: 13px;")
-        else:
+        if self.is_scanning:
+            self.is_scanning = False
+            self.btn_start.setText("🚀 Start Benchmark")
+            self.btn_start.setObjectName("")
+            self.btn_start.setStyleSheet("")
+            
             self.set_progress_state("success")
             self.lbl_status.setText("Scan Complete.")
             self.lbl_status.setStyleSheet(f"color: {C_SUCCESS}; font-weight: bold; font-size: 13px;")
             
-        self.is_scanning = False
         logger.info("Benchmark cycle ended.")
 
     def sort_results(self):
@@ -788,6 +805,7 @@ class ModernDNSApp(QMainWindow):
         self.dns_list.sort(key=get_sort_key)
         self.build_table_headers()
         
+        self.table.setUpdatesEnabled(False)
         for row_idx, info in enumerate(self.dns_list):
             row_id = info["row_id"]
             dom_data = self.results_data.get(row_id, {})
@@ -801,6 +819,7 @@ class ModernDNSApp(QMainWindow):
                 else:
                     item.setForeground(QColor(C_ERROR))
                 self.table.setItem(row_idx, 3 + dom_idx, item)
+        self.table.setUpdatesEnabled(True)
 
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():
