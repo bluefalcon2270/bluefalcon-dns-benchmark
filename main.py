@@ -1,5 +1,5 @@
 # ==========================================
-# BlueFalcon DNS Benchmark Pro v1.0
+# BlueFalcon DNS Benchmark Pro v1.1
 # ==========================================
 import os
 import time
@@ -11,6 +11,7 @@ import subprocess
 import sys
 import re
 import csv
+import ctypes
 import dns.resolver
 import tkinter as tk
 import customtkinter as ctk
@@ -21,7 +22,7 @@ import pandas as pd
 # ==========================================
 # Application Configuration & Constants
 # ==========================================
-APP_VERSION = "1.0"
+APP_VERSION = "1.1"
 
 # Material Design 3 Dark Theme Colors
 C_BG = "#121212"
@@ -42,6 +43,16 @@ ctk.set_default_color_theme("blue")
 # ==========================================
 # Utility & Networking Modules
 # ==========================================
+class AppUtils:
+    @staticmethod
+    def get_resource_path(relative_path):
+        """ Resolves absolute path to bundled resources whether running in Dev or as a PyInstaller OneFile .exe """
+        try:
+            base_path = sys._MEIPASS
+        except Exception:
+            base_path = os.path.abspath(".")
+        return os.path.join(base_path, relative_path)
+
 class NetworkUtils:
     @staticmethod
     def get_system_dns():
@@ -237,13 +248,26 @@ class ModernDNSApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
+        # Tell Windows Shell: "Do not group me with python.exe, I am my own software"
+        if sys.platform.startswith('win'):
+            try:
+                myappid = f"bluefalcon.dnsbenchmark.pro.v{APP_VERSION}"
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+            except Exception: pass
+
         self.title(f"BlueFalcon DNS Benchmark Pro v{APP_VERSION}")
         self.geometry("1280x850")
         self.minsize(1000, 650)
         self.configure(fg_color=C_BG)
 
+        # Apply Universal Icon to Titlebar & Taskbar
+        icon_path = AppUtils.get_resource_path("icon.ico")
+        if os.path.exists(icon_path):
+            try: self.iconbitmap(icon_path)
+            except Exception: pass
+
         # State Variables
-        self.display_mode = "live" # Can be "live" or "history"
+        self.display_mode = "live"
         self.history_results = []
         
         self.config_data = {"dns_list": [], "domain_list": [], "network_list": []}
@@ -274,7 +298,6 @@ class ModernDNSApp(ctk.CTk):
         self.process_queue()
 
     def build_ui(self):
-        # Top App Bar
         self.app_bar = ctk.CTkFrame(self, fg_color="transparent")
         self.app_bar.pack(fill="x", padx=30, pady=(25, 15))
         
@@ -298,7 +321,6 @@ class ModernDNSApp(ctk.CTk):
         ctk.CTkButton(btn_frame, text="ℹ️ About", font=("Helvetica", 14, "bold"), command=self.open_about, 
                       fg_color=C_CARD, hover_color=C_BORDER, border_width=1, border_color=C_BORDER, corner_radius=20, width=80, height=36).pack(side="left", padx=5)
 
-        # Control Card
         self.control_card = ctk.CTkFrame(self, fg_color=C_CARD, corner_radius=16)
         self.control_card.pack(fill="x", padx=30, pady=(0, 20), ipady=10)
 
@@ -329,7 +351,6 @@ class ModernDNSApp(ctk.CTk):
                                         fg_color="transparent", text_color=C_TEXT_MAIN, border_width=1, border_color=C_BORDER, hover_color=C_BG, corner_radius=20, width=130, height=36)
         self.btn_export.pack(side="right", padx=5)
 
-        # Table Area
         self.table_scroll = ScrollableTable(self)
         self.table_scroll.pack(padx=30, pady=(0, 30), fill="both", expand=True)
 
@@ -348,7 +369,6 @@ class ModernDNSApp(ctk.CTk):
         self.dns_list = ConfigManager.parse_dns_list(self.config_data.get("dns_list", []), self.system_dns)
         self.domains = self.config_data.get("domain_list", [])
         
-        # Update Networks UI
         self.networks = self.config_data.get("network_list", [])
         if not self.networks:
             self.networks = ["Unknown"]
@@ -368,14 +388,12 @@ class ModernDNSApp(ctk.CTk):
         filtered_df = df[mask].copy()
         filtered_df['DNS_Name'] = filtered_df['DNS_Name'].fillna("")
         
-        # Group and calculate mean for errors and pings
         grouped = filtered_df.groupby(['DNS_IP', 'DNS_Name']).agg(
             Test_Count=('Errors', 'count'),
             Avg_Errors=('Errors', 'mean'),
             Avg_Ping=('Avg_Ping_ms', lambda x: x[x > 0].mean() if (x > 0).any() else -1)
         ).reset_index()
         
-        # Initial sort by lowest average errors, then lowest average ping
         grouped = grouped.sort_values(by=['Avg_Errors', 'Avg_Ping'], ascending=[True, True])
         
         self.history_results = grouped.to_dict('records')
@@ -408,7 +426,6 @@ class ModernDNSApp(ctk.CTk):
             widget.destroy()
         self.ui_cells.clear()
 
-        # Build UI for HISTORY Mode
         if self.display_mode == "history":
             if not getattr(self, "history_results", None):
                 return
@@ -434,10 +451,8 @@ class ModernDNSApp(ctk.CTk):
             for row_index, row_data in enumerate(self.history_results):
                 grid_row = (row_index * 2) + 1
                 
-                # Row Number
                 ctk.CTkLabel(self.table_scroll.inner_frame, text=str(row_index + 1), font=("Helvetica", 13, "bold"), text_color=C_TEXT_MUTED).grid(row=grid_row, column=0, padx=4, pady=8)
 
-                # DNS Server Column
                 srv_frame = ctk.CTkFrame(self.table_scroll.inner_frame, fg_color="transparent", cursor="hand2")
                 srv_frame.grid(row=grid_row, column=2, padx=10, pady=8, sticky="w")
                 srv_frame.bind("<Double-Button-1>", lambda e, ip=row_data['DNS_IP']: self.copy_to_clipboard(ip))
@@ -449,26 +464,20 @@ class ModernDNSApp(ctk.CTk):
                 if row_data['DNS_Name']:
                     ctk.CTkLabel(srv_frame, text=f" {row_data['DNS_Name']}", font=("Helvetica", 12), text_color=C_TEXT_MUTED).pack(side="left", padx=(4,0))
 
-                # Avg Errors
                 avg_err = round(row_data['Avg_Errors'], 2)
                 err_color = C_SUCCESS if avg_err < 1 else (C_WARNING if avg_err <= 3 else C_ERROR)
                 ctk.CTkLabel(self.table_scroll.inner_frame, text=str(avg_err), font=("Helvetica", 15, "bold"), text_color=err_color).grid(row=grid_row, column=4)
 
-                # Avg Ping
                 ping_val = row_data['Avg_Ping']
                 ping_str = f"{round(ping_val)} ms" if ping_val != -1 else "Failed"
                 ctk.CTkLabel(self.table_scroll.inner_frame, text=ping_str, font=("Helvetica", 14, "bold"), text_color=C_TEXT_MAIN).grid(row=grid_row, column=6)
 
-                # Tests Count
                 ctk.CTkLabel(self.table_scroll.inner_frame, text=str(int(row_data['Test_Count'])), font=("Helvetica", 14, "bold"), text_color=C_TEXT_MUTED).grid(row=grid_row, column=8)
 
                 ctk.CTkFrame(self.table_scroll.inner_frame, height=1, fg_color=C_BG).grid(row=grid_row + 1, column=0, columnspan=total_cols, sticky="ew", padx=10)
 
             return
 
-        # ==========================================
-        # Build UI for LIVE Mode
-        # ==========================================
         if not self.active_profiles:
             ctk.CTkLabel(self.table_scroll.inner_frame, text="No Configuration Loaded. Click '📂 Profiles' to select files.", 
                          font=("Helvetica", 16, "bold"), text_color=C_WARNING).grid(row=0, column=0, padx=30, pady=30)
@@ -504,11 +513,9 @@ class ModernDNSApp(ctk.CTk):
             row_id = info["row_id"]
             self.ui_cells[row_id] = {}
 
-            # Row Number
             lbl_row_num = ctk.CTkLabel(self.table_scroll.inner_frame, text=str(row_index + 1), font=("Helvetica", 13, "bold"), text_color=C_TEXT_MUTED)
             lbl_row_num.grid(row=grid_row, column=0, padx=4, pady=8)
 
-            # DNS Server Column
             srv_frame = ctk.CTkFrame(self.table_scroll.inner_frame, fg_color="transparent", cursor="hand2")
             srv_frame.grid(row=grid_row, column=2, padx=10, pady=8, sticky="w")
             srv_frame.bind("<Double-Button-1>", lambda e, ip=info["ip"]: self.copy_to_clipboard(ip))
@@ -524,7 +531,6 @@ class ModernDNSApp(ctk.CTk):
 
             avg_text, err_text = self.calculate_metrics(row_id)
             
-            # Errors Column
             grade_color = C_TEXT_MUTED
             if err_text != "-":
                 err_val = int(err_text)
@@ -536,12 +542,10 @@ class ModernDNSApp(ctk.CTk):
             lbl_grade.grid(row=grid_row, column=4)
             self.ui_cells[row_id]["_grade"] = lbl_grade
 
-            # Avg Ping Column
             lbl_avg = ctk.CTkLabel(self.table_scroll.inner_frame, text=avg_text, font=("Helvetica", 14, "bold"), text_color=C_TEXT_MAIN)
             lbl_avg.grid(row=grid_row, column=6)
             self.ui_cells[row_id]["_avg"] = lbl_avg
 
-            # Domains Columns
             for col_idx, domain in enumerate(self.domains, start=4):
                 actual_col = col_idx * 2
                 lbl_cell = ctk.CTkLabel(self.table_scroll.inner_frame, text="-", text_color=C_BORDER, font=("Helvetica", 14, "bold"), width=110)
@@ -551,7 +555,6 @@ class ModernDNSApp(ctk.CTk):
             ctk.CTkFrame(self.table_scroll.inner_frame, height=1, fg_color=C_BG).grid(row=grid_row + 1, column=0, columnspan=total_cols, sticky="ew", padx=10)
 
     def toggle_scan(self):
-        # Switching back to Live Mode if we were in History Mode
         if self.display_mode == "history":
             self.display_mode = "live"
             self.build_grid()
@@ -681,12 +684,10 @@ class ModernDNSApp(ctk.CTk):
                 messagebox.showinfo("Info", "Load history data to sort.")
                 return
             
-            # Sort History Mode Data
             self.history_results.sort(key=lambda x: (x['Avg_Errors'], x['Avg_Ping']))
             self.build_grid()
             
         else:
-            # Sort Live Mode Data
             if not self.results_data or self.is_scanning:
                 messagebox.showinfo("Info", "Complete a scan before sorting.")
                 return
@@ -769,9 +770,6 @@ class ModernDNSApp(ctk.CTk):
             messagebox.showerror("Error", f"Failed to save: {str(e)}")
 
 
-    # ==========================================
-    # History Management Window
-    # ==========================================
     def open_history(self):
         if not os.path.exists("benchmark_history.csv"):
             messagebox.showinfo("History", "No history found. Complete a benchmark scan first.")
@@ -798,7 +796,6 @@ class ModernDNSApp(ctk.CTk):
         scroll = ctk.CTkScrollableFrame(win, fg_color=C_CARD, corner_radius=12)
         scroll.pack(fill="both", expand=True, padx=20, pady=10)
 
-        # Dictionary to keep UI state relationships avoiding infinite recursion triggers
         checkboxes = {}
         updating_flag = {"state": False} 
 
@@ -859,9 +856,6 @@ class ModernDNSApp(ctk.CTk):
         btn_load.pack(fill="x", padx=20, pady=(5, 20))
 
 
-    # ==========================================
-    # Profile Management Window
-    # ==========================================
     def open_profiles_manager(self):
         win = ctk.CTkToplevel(self, fg_color=C_BG)
         win.title("Profile Manager")
@@ -954,9 +948,6 @@ class ModernDNSApp(ctk.CTk):
         if self.display_mode == "history" or not self.is_sorted or self.is_scanning:
             btn_best.configure(state="disabled", fg_color=C_BORDER, text_color=C_TEXT_MUTED)
 
-    # ==========================================
-    # Secondary Windows (Settings & About)
-    # ==========================================
     def open_settings(self):
         win = ctk.CTkToplevel(self, fg_color=C_BG)
         win.title("Settings")
