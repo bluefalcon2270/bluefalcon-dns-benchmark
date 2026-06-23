@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 import dns.resolver
 
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.2.0"
 
 # Setup Paths
 BASE_DIR = Path(__file__).resolve().parent
@@ -157,6 +157,34 @@ class ConfigManager:
             except Exception as e:
                 logger.error(f"Failed to load profile {filename}: {e}")
         return data
+
+    @staticmethod
+    def load_multiple_profiles(filenames: list[str]) -> dict:
+        merged_data = {"dns_list": [], "domain_list": [], "network_list": []}
+        seen_dns = set()
+        seen_domains = set()
+        seen_networks = set()
+
+        for fname in filenames:
+            data = ConfigManager.load_single_profile(fname)
+            
+            for dns in data.get("dns_list", []):
+                ip_only = dns.split()[0] if dns else ""
+                if ip_only and ip_only not in seen_dns:
+                    seen_dns.add(ip_only)
+                    merged_data["dns_list"].append(dns)
+                    
+            for dom in data.get("domain_list", []):
+                if dom not in seen_domains:
+                    seen_domains.add(dom)
+                    merged_data["domain_list"].append(dom)
+
+            for net in data.get("network_list", []):
+                if net not in seen_networks:
+                    seen_networks.add(net)
+                    merged_data["network_list"].append(net)
+                    
+        return merged_data
 
     @staticmethod
     def save_single_profile(filename: str, data: dict):

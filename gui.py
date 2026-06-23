@@ -3,7 +3,7 @@
 # ==========================================
 import sys
 import csv
-import logging  # <-- THE FIX: Imported logging
+import logging
 import concurrent.futures
 from datetime import datetime
 from pathlib import Path
@@ -12,94 +12,131 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QComboBox, QProgressBar, QTableWidget, QTableWidgetItem,
     QHeaderView, QMessageBox, QTabWidget, QTextEdit, QListWidget, QLineEdit, QInputDialog,
-    QAbstractItemView
+    QAbstractItemView, QDialog, QFormLayout, QDialogButtonBox, QSpacerItem, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QFont, QColor, QIntValidator, QDoubleValidator
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QUrl
+from PyQt6.QtGui import QFont, QColor, QIntValidator, QDoubleValidator, QDesktopServices
 
 from core import APP_VERSION, AppUtils, NetworkUtils, ConfigManager, logger, LOG_FILE, BASE_DIR
 
-# --- PyQt Dark Theme Stylesheet ---
-DARK_STYLESHEET = """
-QWidget {
-    background-color: #121212;
-    color: #E3E3E3;
-    font-family: 'Segoe UI', Arial, sans-serif;
-}
-QTableWidget {
-    background-color: #1E1E1E;
-    gridline-color: #444746;
-    border: 1px solid #444746;
+# Material Design 3 Dark Theme Colors
+C_SURFACE = "#131314"
+C_CONTAINER = "#1E1F22"
+C_PRIMARY = "#A8C7FA"      
+C_PRIMARY_BG = "#0742A0"   
+C_SUCCESS = "#81C995"      
+C_ERROR = "#F28B82"        
+C_WARNING = "#FDD663"      
+C_PRO = "#FFD700"          
+C_TEXT_MAIN = "#E3E3E3"
+C_TEXT_MUTED = "#8E918F"
+C_BORDER = "#444746"
+
+# --- Google Material Design 3 (M3) Stylesheet ---
+DARK_STYLESHEET = f"""
+QWidget {{
+    background-color: {C_SURFACE};
+    color: {C_TEXT_MAIN};
+    font-family: 'Roboto', 'Segoe UI', system-ui, sans-serif;
+}}
+QTableWidget {{
+    background-color: {C_CONTAINER};
+    gridline-color: {C_BORDER};
+    border: 1px solid {C_BORDER};
     border-radius: 8px;
-}
-QHeaderView::section {
-    background-color: #121212;
-    padding: 4px;
-    border: 1px solid #444746;
+}}
+QHeaderView::section {{
+    background-color: {C_SURFACE};
+    padding: 6px;
+    border: 1px solid {C_BORDER};
     font-weight: bold;
-}
-QPushButton {
-    background-color: #0742A0;
-    color: #A8C7FA;
+    font-size: 13px;
+}}
+QPushButton {{
+    background-color: {C_PRIMARY_BG};
+    color: {C_PRIMARY};
     border: none;
-    border-radius: 15px;
+    border-radius: 16px;
     padding: 8px 16px;
     font-weight: bold;
-}
-QPushButton:hover {
+    font-size: 13px;
+}}
+QPushButton:hover {{
     background-color: #063580;
-}
-QPushButton#successBtn {
-    background-color: #81C995;
-    color: #121212;
-}
-QPushButton#successBtn:hover {
+}}
+QPushButton#successBtn {{
+    background-color: {C_SUCCESS};
+    color: {C_SURFACE};
+}}
+QPushButton#successBtn:hover {{
     background-color: #6BBA80;
-}
-QPushButton#dangerBtn {
+}}
+QPushButton#dangerBtn {{
     background-color: #601410;
-    color: #F28B82;
-}
-QPushButton#dangerBtn:hover {
+    color: {C_ERROR};
+}}
+QPushButton#dangerBtn:hover {{
     background-color: #400D0B;
-}
-QPushButton#outlineBtn {
+}}
+QPushButton#outlineBtn {{
     background-color: transparent;
-    border: 1px solid #444746;
-    color: #E3E3E3;
-}
-QPushButton#outlineBtn:hover {
-    background-color: #1E1E1E;
-}
-QProgressBar {
-    border: 1px solid #444746;
-    border-radius: 4px;
-    text-align: center;
-    background-color: #1E1E1E;
-}
-QProgressBar::chunk {
-    background-color: #A8C7FA;
-}
-QTabWidget::pane {
-    border: 1px solid #444746;
-    border-radius: 4px;
-}
-QTabBar::tab {
-    background-color: #1E1E1E;
-    border: 1px solid #444746;
-    padding: 8px 20px;
-    margin-right: 2px;
-}
-QTabBar::tab:selected {
-    background-color: #0742A0;
-    color: #A8C7FA;
-}
-QLineEdit, QListWidget, QTextEdit {
-    background-color: #1E1E1E;
-    border: 1px solid #444746;
-    border-radius: 4px;
-    padding: 4px;
-}
+    border: 1px solid {C_BORDER};
+    color: {C_TEXT_MAIN};
+}}
+QPushButton#outlineBtn:hover {{
+    background-color: {C_CONTAINER};
+}}
+QPushButton#iconBtn {{
+    background-color: transparent;
+    border: 1px solid {C_BORDER};
+    border-radius: 18px;
+    color: {C_TEXT_MAIN};
+}}
+QPushButton#iconBtn:hover {{
+    background-color: {C_CONTAINER};
+}}
+QPushButton#sortBtn {{
+    background-color: transparent;
+    border: 1px solid {C_BORDER};
+    border-radius: 8px;
+    color: {C_TEXT_MAIN};
+    padding: 2px 12px;
+    margin-bottom: 6px;
+    font-size: 18px;
+}}
+QPushButton#sortBtn:hover {{
+    background-color: {C_CONTAINER};
+}}
+QTabWidget::pane {{
+    border: none;
+    border-top: 1px solid {C_BORDER};
+}}
+QTabBar::tab {{
+    background-color: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 24px;
+    margin-right: 4px;
+    font-weight: bold;
+    color: {C_TEXT_MUTED};
+}}
+QTabBar::tab:selected {{
+    color: {C_PRIMARY};
+    border-bottom: 2px solid {C_PRIMARY};
+}}
+QTabBar::tab:hover {{
+    color: {C_TEXT_MAIN};
+}}
+QLineEdit, QListWidget, QTextEdit, QComboBox {{
+    background-color: {C_CONTAINER};
+    border: 1px solid {C_BORDER};
+    border-radius: 6px;
+    padding: 6px;
+    selection-background-color: {C_PRIMARY_BG};
+}}
+QComboBox::drop-down {{
+    border: none;
+}}
 """
 
 # --- Custom Log Handler to bridge Python logging to PyQt ---
@@ -153,21 +190,59 @@ class BenchmarkWorker(QThread):
         self._is_running = False
 
 
-# --- Preferences & Profile Builder Window ---
-class PreferencesWindow(QTabWidget):
+# --- Custom Input Dialogs ---
+class AddDNSDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add DNS Server")
+        self.setFixedSize(350, 160)
+        
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        
+        self.ip_input = QLineEdit()
+        self.ip_input.setPlaceholderText("e.g., 1.1.1.1")
+        
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("e.g., Cloudflare (Optional)")
+        
+        form.addRow("IP Address:", self.ip_input)
+        form.addRow("Provider Name:", self.name_input)
+        
+        layout.addLayout(form)
+        
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def get_data(self):
+        ip = self.ip_input.text().strip()
+        name = self.name_input.text().strip()
+        if not ip:
+            return None
+        return f"{ip} {name}".strip()
+
+
+# --- Preferences Window (Modal Dialog) ---
+class PreferencesWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Preferences")
-        self.setMinimumSize(600, 500)
+        self.setMinimumSize(600, 520)
         self.parent_app = parent
+
+        layout = QVBoxLayout(self)
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs)
 
         self.tab_profiles = QWidget()
         self.tab_settings = QWidget()
         self.tab_about = QWidget()
 
-        self.addTab(self.tab_profiles, "📁 Profile Builder")
-        self.addTab(self.tab_settings, "⚙️ Settings")
-        self.addTab(self.tab_about, "ℹ️ About")
+        self.tabs.addTab(self.tab_profiles, "📁 Profile Builder")
+        self.tabs.addTab(self.tab_settings, "⚙️ Settings")
+        self.tabs.addTab(self.tab_about, "ℹ️ About")
 
         self.build_profile_tab()
         self.build_settings_tab()
@@ -175,6 +250,7 @@ class PreferencesWindow(QTabWidget):
 
     def build_profile_tab(self):
         layout = QVBoxLayout(self.tab_profiles)
+        layout.setContentsMargins(15, 20, 15, 15)
         
         # Profile Selector
         top_layout = QHBoxLayout()
@@ -192,7 +268,7 @@ class PreferencesWindow(QTabWidget):
 
         # Lists Grid
         grid = QGridLayout()
-        grid.addWidget(QLabel("<b>DNS Servers</b> (IP Name)"), 0, 0)
+        grid.addWidget(QLabel("<b>DNS Servers</b>"), 0, 0)
         grid.addWidget(QLabel("<b>Domains</b>"), 0, 1)
         grid.addWidget(QLabel("<b>Networks</b>"), 0, 2)
 
@@ -205,21 +281,21 @@ class PreferencesWindow(QTabWidget):
         grid.addWidget(self.list_nets, 1, 2)
 
         # Add/Remove Buttons
-        def make_controls(list_widget, item_type):
+        def make_controls(list_widget, add_callback):
             h = QHBoxLayout()
             b_add = QPushButton("+")
             b_rem = QPushButton("-")
             b_add.setObjectName("outlineBtn")
             b_rem.setObjectName("outlineBtn")
-            b_add.clicked.connect(lambda: self.add_list_item(list_widget, item_type))
+            b_add.clicked.connect(add_callback)
             b_rem.clicked.connect(lambda: self.remove_list_item(list_widget))
             h.addWidget(b_add)
             h.addWidget(b_rem)
             return h
 
-        grid.addLayout(make_controls(self.list_dns, "DNS (e.g., 8.8.8.8 Google)"), 2, 0)
-        grid.addLayout(make_controls(self.list_domains, "Domain (e.g., google.com)"), 2, 1)
-        grid.addLayout(make_controls(self.list_nets, "Network Name"), 2, 2)
+        grid.addLayout(make_controls(self.list_dns, self.add_dns_item), 2, 0)
+        grid.addLayout(make_controls(self.list_domains, lambda: self.add_simple_item(self.list_domains, "Domain (e.g., google.com)")), 2, 1)
+        grid.addLayout(make_controls(self.list_nets, lambda: self.add_simple_item(self.list_nets, "Network Name")), 2, 2)
 
         layout.addLayout(grid)
 
@@ -241,8 +317,18 @@ class PreferencesWindow(QTabWidget):
             self.combo_profile.addItems(ConfigManager.get_available_profiles())
             self.combo_profile.setCurrentText(filename)
 
-    def add_list_item(self, list_widget, item_type):
-        text, ok = QInputDialog.getText(self, f"Add {item_type}", "Value:")
+            if self.parent_app:
+                self.parent_app.refresh_profile_list()
+
+    def add_dns_item(self):
+        dialog = AddDNSDialog(self)
+        if dialog.exec():
+            val = dialog.get_data()
+            if val:
+                self.list_dns.addItem(val)
+
+    def add_simple_item(self, list_widget, title):
+        text, ok = QInputDialog.getText(self, "Add Item", title)
         if ok and text.strip():
             list_widget.addItem(text.strip())
 
@@ -271,10 +357,12 @@ class PreferencesWindow(QTabWidget):
         ConfigManager.save_single_profile(filename, data)
         QMessageBox.information(self, "Success", f"Profile {filename} saved successfully.")
         if self.parent_app:
+            self.parent_app.refresh_profile_list()
             self.parent_app.reload_active_profiles()
 
     def build_settings_tab(self):
         layout = QVBoxLayout(self.tab_settings)
+        layout.setContentsMargins(30, 30, 30, 30)
         
         g = QGridLayout()
         g.addWidget(QLabel("Connection Timeout (Seconds):"), 0, 0)
@@ -303,23 +391,41 @@ class PreferencesWindow(QTabWidget):
 
     def build_about_tab(self):
         layout = QVBoxLayout(self.tab_about)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        lbl_title = QLabel(f"<b>BlueFalcon DNS Benchmark Pro</b> v{APP_VERSION}")
-        lbl_title.setFont(QFont("Segoe UI", 16))
+        lbl_title = QLabel(f"<b>BlueFalcon DNS Benchmark Pro</b>")
+        lbl_title.setFont(QFont("Segoe UI", 22))
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_title)
 
-        lbl_desc = QLabel("A highly optimized, multi-threaded networking utility engineered for accurate DNS latency and testing.")
+        lbl_version = QLabel(f"Version {APP_VERSION}")
+        lbl_version.setFont(QFont("Segoe UI", 12))
+        lbl_version.setStyleSheet(f"color: {C_PRIMARY};")
+        lbl_version.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(lbl_version)
+        
+        layout.addSpacing(20)
+
+        lbl_desc = QLabel("A highly optimized, multi-threaded Windows networking utility engineered for accurate DNS latency benchmarking and profile workflow management.")
         lbl_desc.setWordWrap(True)
         lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_desc.setStyleSheet(f"color: {C_TEXT_MUTED};")
         layout.addWidget(lbl_desc)
-
-        lbl_link = QLabel('<a href="https://github.com/bluefalcon2270/bluefalcon-dns-benchmark" style="color: #A8C7FA;">GitHub Repository</a>')
-        lbl_link.setOpenExternalLinks(True)
-        lbl_link.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(lbl_link)
         
-        layout.addStretch()
+        layout.addSpacing(20)
+
+        lbl_dev = QLabel("<b>Developer:</b> BlueFalcon")
+        lbl_dev.setFont(QFont("Segoe UI", 12))
+        lbl_dev.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(lbl_dev)
+
+        layout.addSpacing(30)
+
+        # Native Link Button
+        btn_github = QPushButton("🌐 View Source on GitHub")
+        btn_github.setFixedWidth(240)
+        btn_github.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/bluefalcon2270/bluefalcon-dns-benchmark")))
+        layout.addWidget(btn_github, alignment=Qt.AlignmentFlag.AlignCenter)
 
 
 # --- Main Application Window ---
@@ -327,7 +433,7 @@ class ModernDNSApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"BlueFalcon DNS Benchmark Pro v{APP_VERSION}")
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(1050, 700)
         
         # Pre-Flight Checks
         if not AppUtils.is_admin():
@@ -356,59 +462,90 @@ class ModernDNSApp(QMainWindow):
         # Load default profile on start
         default_prof = ConfigManager.get_available_profiles()[0]
         self.active_profiles = [default_prof]
+        self.refresh_profile_list()
         self.reload_active_profiles()
+
+    def set_progress_state(self, state: str):
+        """ Dynamically recolor the progress bar based on engine state """
+        base_style = f"QProgressBar {{ border: 1px solid {C_BORDER}; border-radius: 4px; text-align: center; background-color: {C_CONTAINER}; "
+        
+        if state == "idle":
+            color = "#5F6368"
+            text_color = C_TEXT_MAIN
+        elif state == "running":
+            color = C_PRIMARY
+            text_color = C_SURFACE
+        elif state == "success":
+            color = C_SUCCESS
+            text_color = C_SURFACE
+        elif state == "aborted":
+            color = C_ERROR
+            text_color = C_SURFACE
+        else:
+            color = "#5F6368"
+            text_color = C_TEXT_MAIN
+            
+        self.progress_bar.setStyleSheet(f"{base_style} color: {text_color}; }} QProgressBar::chunk {{ background-color: {color}; border-radius: 3px; }}")
 
     def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(20, 20, 20, 20)
 
-        # Top Bar
+        # M3 Top Control Bar (Consolidated)
         top_bar = QHBoxLayout()
-        title = QLabel(f"🌐 <b>DNS Benchmark</b> <span style='color:{C_PRO};'>Pro</span>")
-        title.setFont(QFont("Helvetica", 20))
-        top_bar.addWidget(title)
-        top_bar.addStretch()
-
-        btn_prefs = QPushButton("⚙️ Preferences")
-        btn_prefs.setObjectName("outlineBtn")
-        btn_prefs.clicked.connect(self.open_preferences)
-        top_bar.addWidget(btn_prefs)
-        
-        main_layout.addLayout(top_bar)
-
-        # Controls Card
-        control_card = QWidget()
-        control_card.setObjectName("card")
-        control_layout = QHBoxLayout(control_card)
+        top_bar.setSpacing(15)
 
         self.btn_start = QPushButton("🚀 Start Benchmark")
+        self.btn_start.setMinimumWidth(160)
         self.btn_start.clicked.connect(self.toggle_scan)
-        control_layout.addWidget(self.btn_start)
-
-        control_layout.addWidget(QLabel("Network:"))
-        self.combo_net = QComboBox()
-        control_layout.addWidget(self.combo_net)
+        top_bar.addWidget(self.btn_start)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
-        control_layout.addWidget(self.progress_bar)
+        self.progress_bar.setFixedWidth(250)
+        self.progress_bar.setFixedHeight(24)
+        top_bar.addWidget(self.progress_bar)
+        self.set_progress_state("idle")
 
         self.lbl_status = QLabel("Ready.")
-        self.lbl_status.setStyleSheet(f"color: {C_WARNING}; font-weight: bold;")
-        control_layout.addWidget(self.lbl_status)
-        control_layout.addStretch()
+        self.lbl_status.setStyleSheet(f"color: {C_WARNING}; font-weight: bold; font-size: 13px;")
+        top_bar.addWidget(self.lbl_status)
 
-        btn_export = QPushButton("💾 Export CSV")
-        btn_export.setObjectName("outlineBtn")
-        btn_export.clicked.connect(self.export_csv)
-        control_layout.addWidget(btn_export)
+        top_bar.addStretch()
 
-        main_layout.addWidget(control_card)
+        self.combo_net = QComboBox()
+        self.combo_net.setFixedWidth(160)
+        top_bar.addWidget(self.combo_net)
+
+        self.combo_profile_main = QComboBox()
+        self.combo_profile_main.setFixedWidth(160)
+        self.combo_profile_main.currentTextChanged.connect(self.switch_profile)
+        top_bar.addWidget(self.combo_profile_main)
+
+        # Circular Icon Button for Preferences
+        btn_prefs = QPushButton("⚙")
+        btn_prefs.setObjectName("iconBtn")
+        btn_prefs.setToolTip("Preferences")
+        btn_prefs.setFixedSize(36, 36)
+        btn_prefs.clicked.connect(self.open_preferences)
+        top_bar.addWidget(btn_prefs)
+
+        main_layout.addLayout(top_bar)
+        main_layout.addSpacing(10)
 
         # Main Workspace Tab
         self.workspace = QTabWidget()
+        
+        # Corner Sort Button with Icon
+        btn_sort = QPushButton("⇕")
+        btn_sort.setObjectName("sortBtn")
+        btn_sort.setToolTip("Sort by lowest errors and response time")
+        btn_sort.clicked.connect(self.sort_results)
+        self.workspace.setCornerWidget(btn_sort, Qt.Corner.TopRightCorner)
+
         self.tab_table = QWidget()
         self.tab_logs = QWidget()
         
@@ -417,13 +554,16 @@ class ModernDNSApp(QMainWindow):
 
         # Setup Table Tab
         table_layout = QVBoxLayout(self.tab_table)
+        table_layout.setContentsMargins(0, 10, 0, 0)
         self.table = QTableWidget()
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
+        self.table.setShowGrid(False) # M3 aesthetic
         table_layout.addWidget(self.table)
 
         # Setup Logs Tab
         log_layout = QVBoxLayout(self.tab_logs)
+        log_layout.setContentsMargins(0, 10, 0, 0)
         self.log_viewer = QTextEdit()
         self.log_viewer.setReadOnly(True)
         self.log_viewer.setFont(QFont("Consolas", 10))
@@ -445,7 +585,24 @@ class ModernDNSApp(QMainWindow):
 
     def open_preferences(self):
         self.prefs_win = PreferencesWindow(self)
-        self.prefs_win.show()
+        self.prefs_win.exec()
+
+    def refresh_profile_list(self):
+        current = self.combo_profile_main.currentText()
+        self.combo_profile_main.blockSignals(True)
+        self.combo_profile_main.clear()
+        profiles = ConfigManager.get_available_profiles()
+        self.combo_profile_main.addItems(profiles)
+        if current in profiles:
+            self.combo_profile_main.setCurrentText(current)
+        elif profiles:
+            self.combo_profile_main.setCurrentText(profiles[0])
+        self.combo_profile_main.blockSignals(False)
+
+    def switch_profile(self, profile_name):
+        if profile_name and not self.is_scanning:
+            self.active_profiles = [profile_name]
+            self.reload_active_profiles()
 
     def reload_active_profiles(self):
         if not self.active_profiles: return
@@ -458,29 +615,30 @@ class ModernDNSApp(QMainWindow):
         self.combo_net.addItems(self.networks)
 
         self.build_table_headers()
-        logger.info(f"Loaded profiles. Found {len(self.dns_list)} DNS targets and {len(self.domains)} domains.")
+        logger.info(f"Loaded profile: {self.active_profiles[0]}. Found {len(self.dns_list)} DNS targets and {len(self.domains)} domains.")
 
     def build_table_headers(self):
         self.table.clear()
-        headers = ["DNS Server", "Sys", "Avg Ping", "Errors"] + [ConfigManager.format_domain(d) for d in self.domains]
+        headers = ["DNS Server", "Avg Ping", "Errors"] + [ConfigManager.format_domain(d) for d in self.domains]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         self.table.setRowCount(len(self.dns_list))
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
         for row, info in enumerate(self.dns_list):
-            self.table.setItem(row, 0, QTableWidgetItem(f"{info['ip']} {info['name']}"))
-            self.table.setItem(row, 1, QTableWidgetItem("★" if info['is_system'] else ""))
+            sys_mark = " ★" if info['is_system'] else ""
+            self.table.setItem(row, 0, QTableWidgetItem(f"{info['ip']} {info['name']}{sys_mark}"))
+            self.table.setItem(row, 1, QTableWidgetItem("-"))
             self.table.setItem(row, 2, QTableWidgetItem("-"))
-            self.table.setItem(row, 3, QTableWidgetItem("-"))
             for col in range(len(self.domains)):
-                self.table.setItem(row, 4 + col, QTableWidgetItem("..."))
+                self.table.setItem(row, 3 + col, QTableWidgetItem("..."))
 
     def toggle_scan(self):
         if self.worker and self.worker.isRunning():
             self.worker.stop()
             self.btn_start.setEnabled(False)
             self.lbl_status.setText("Aborting...")
+            self.set_progress_state("aborted")
             logger.warning("Scan aborted by user.")
             return
 
@@ -493,12 +651,16 @@ class ModernDNSApp(QMainWindow):
         self.completed_tasks = 0
         self.progress_bar.setMaximum(self.total_tasks)
         self.progress_bar.setValue(0)
+        self.set_progress_state("running")
         
+        self.combo_net.setEnabled(False)
+        self.combo_profile_main.setEnabled(False)
+
         self.btn_start.setText("🛑 Stop Scan")
         self.btn_start.setObjectName("dangerBtn")
         self.btn_start.setStyleSheet("") # Force repaint
         self.lbl_status.setText("Benchmarking...")
-        self.lbl_status.setStyleSheet(f"color: {C_PRIMARY};")
+        self.lbl_status.setStyleSheet(f"color: {C_PRIMARY}; font-weight: bold; font-size: 13px;")
 
         self.worker = BenchmarkWorker(self.dns_list, self.domains, self.current_timeout, self.current_workers)
         self.worker.progress_update.connect(self.handle_progress)
@@ -521,7 +683,7 @@ class ModernDNSApp(QMainWindow):
             item.setForeground(QColor(C_SUCCESS))
         else:
             item.setForeground(QColor(C_ERROR))
-        self.table.setItem(row_idx, 4 + dom_idx, item)
+        self.table.setItem(row_idx, 3 + dom_idx, item)
 
         self.recalculate_row_metrics(row_idx, row_id)
 
@@ -545,18 +707,22 @@ class ModernDNSApp(QMainWindow):
         elif failures <= 2: ei.setForeground(QColor(C_WARNING))
         else: ei.setForeground(QColor(C_ERROR))
 
-        self.table.setItem(row_idx, 2, pi)
-        self.table.setItem(row_idx, 3, ei)
+        self.table.setItem(row_idx, 1, pi)
+        self.table.setItem(row_idx, 2, ei)
 
     @pyqtSlot()
     def scan_finished(self):
         self.btn_start.setEnabled(True)
+        self.combo_net.setEnabled(True)
+        self.combo_profile_main.setEnabled(True)
+        
         self.btn_start.setText("🚀 Start Benchmark")
         self.btn_start.setObjectName("")
         self.btn_start.setStyleSheet("")
         
+        self.set_progress_state("success")
         self.lbl_status.setText("Scan Complete. Saving...")
-        self.lbl_status.setStyleSheet(f"color: {C_SUCCESS}; font-weight: bold;")
+        self.lbl_status.setStyleSheet(f"color: {C_SUCCESS}; font-weight: bold; font-size: 13px;")
         self._save_to_history()
         self.lbl_status.setText("Scan Complete & Saved.")
         logger.info("Benchmark cycle completed.")
@@ -573,8 +739,8 @@ class ModernDNSApp(QMainWindow):
                     writer.writerow(["Timestamp", "Network", "DNS_IP", "DNS_Name", "Errors", "Avg_Ping_ms"])
 
                 for row_idx, info in enumerate(self.dns_list):
-                    err_item = self.table.item(row_idx, 3)
-                    ping_item = self.table.item(row_idx, 2)
+                    err_item = self.table.item(row_idx, 2)
+                    ping_item = self.table.item(row_idx, 1)
                     
                     err_val = int(err_item.text()) if err_item and err_item.text().isdigit() else len(self.domains)
                     ping_val = int(ping_item.text().replace(" ms", "")) if ping_item and "ms" in ping_item.text() else -1
@@ -583,35 +749,37 @@ class ModernDNSApp(QMainWindow):
         except Exception as e:
             logger.error(f"Failed to save history CSV: {e}")
 
-    def export_csv(self):
+    def sort_results(self):
         if not self.results_data or (self.worker and self.worker.isRunning()):
-            QMessageBox.warning(self, "Warning", "Complete a scan before exporting.")
+            QMessageBox.information(self, "Info", "Complete a scan before sorting.")
             return
 
-        fp, _ = filedialog.getSaveFileName(self, "Export CSV", "", "CSV files (*.csv)")
-        if not fp: return
-
-        try:
-            with open(fp, mode='w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                headers = ["DNS IP", "Name", "System DNS", "Avg Ping", "Errors"] + [ConfigManager.format_domain(d) for d in self.domains]
-                writer.writerow(headers)
-
-                for row_idx, info in enumerate(self.dns_list):
-                    ping_val = self.table.item(row_idx, 2).text()
-                    err_val = self.table.item(row_idx, 3).text()
-                    row_data = [info["ip"], info["name"], "Yes" if info["is_system"] else "No", ping_val, err_val]
+        def get_sort_key(info):
+            row_id = info["row_id"]
+            row_res = self.results_data.get(row_id, {})
+            success_count = sum(1 for d in self.domains if row_res.get(d, {}).get("success"))
+            total_time = sum(row_res.get(d, {}).get("time", 0) for d in self.domains if row_res.get(d, {}).get("success"))
                     
-                    for dom in self.domains:
-                        res = self.results_data.get(info["row_id"], {}).get(dom, {})
-                        row_data.append(res.get("text", "-") if res.get("success") else res.get("text", "Error"))
-                        
-                    writer.writerow(row_data)
-            logger.info(f"Data exported to: {fp}")
-            QMessageBox.information(self, "Success", f"Data exported successfully.")
-        except Exception as e:
-            logger.error(f"Export failed: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to export: {e}")
+            fail_count = len(self.domains) - success_count
+            avg_ping = (total_time / success_count) if success_count > 0 else float('inf')
+            return (fail_count, avg_ping)
+
+        self.dns_list.sort(key=get_sort_key)
+        self.build_table_headers()
+        
+        for row_idx, info in enumerate(self.dns_list):
+            row_id = info["row_id"]
+            dom_data = self.results_data.get(row_id, {})
+            
+            self.recalculate_row_metrics(row_idx, row_id)
+            for dom, res in dom_data.items():
+                dom_idx = self.domains.index(dom)
+                item = QTableWidgetItem(res.get("text", "-"))
+                if res.get("success"):
+                    item.setForeground(QColor(C_SUCCESS))
+                else:
+                    item.setForeground(QColor(C_ERROR))
+                self.table.setItem(row_idx, 3 + dom_idx, item)
 
     def closeEvent(self, event):
         """ Graceful application shutdown intercept. """
