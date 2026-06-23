@@ -10,10 +10,10 @@ import logging
 from pathlib import Path
 import dns.resolver
 
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.2.1"
 
-# Setup Paths
-BASE_DIR = Path(__file__).resolve().parent
+# Setup Paths - Force CWD so files are always created next to the execution context
+BASE_DIR = Path.cwd()
 LOG_FILE = BASE_DIR / "bluefalcon-app.log"
 
 # Configure Logging
@@ -31,7 +31,7 @@ logger = logging.getLogger("BlueFalconCore")
 class AppUtils:
     @staticmethod
     def get_resource_path(relative_path: str) -> Path:
-        """ Resolves absolute path to bundled resources for PyInstaller. """
+        """ Resolves absolute path to bundled resources. """
         try:
             base_path = Path(sys._MEIPASS)
         except Exception:
@@ -197,7 +197,7 @@ class ConfigManager:
                 for item in data.get("domain_list", []): f.write(f"{item}\n")
                 f.write("\n\nNetwork:\n")
                 for item in data.get("network_list", []): f.write(f"{item}\n")
-            logger.info(f"Successfully saved profile: {filename}")
+            logger.info(f"Successfully saved profile text file directly to: {filepath}")
         except Exception as e:
             logger.error(f"Failed to save profile {filename}: {e}")
 

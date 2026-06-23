@@ -4,6 +4,7 @@
 import sys
 import csv
 import logging
+import queue
 import concurrent.futures
 from datetime import datetime
 from pathlib import Path
@@ -12,10 +13,10 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QComboBox, QProgressBar, QTableWidget, QTableWidgetItem,
     QHeaderView, QMessageBox, QTabWidget, QTextEdit, QListWidget, QLineEdit, QInputDialog,
-    QAbstractItemView, QDialog, QFormLayout, QDialogButtonBox, QSpacerItem, QSizePolicy
+    QAbstractItemView, QDialog, QFormLayout, QDialogButtonBox
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QUrl
-from PyQt6.QtGui import QFont, QColor, QIntValidator, QDoubleValidator, QDesktopServices
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QUrl, QTimer
+from PyQt6.QtGui import QFont, QColor, QIntValidator, QDoubleValidator, QDesktopServices, QIcon
 
 from core import APP_VERSION, AppUtils, NetworkUtils, ConfigManager, logger, LOG_FILE, BASE_DIR
 
@@ -89,8 +90,10 @@ QPushButton#outlineBtn:hover {{
 QPushButton#iconBtn {{
     background-color: transparent;
     border: 1px solid {C_BORDER};
-    border-radius: 18px;
+    border-radius: 20px;
     color: {C_TEXT_MAIN};
+    padding: 0px;
+    font-size: 20px;
 }}
 QPushButton#iconBtn:hover {{
     background-color: {C_CONTAINER};
@@ -139,7 +142,6 @@ QComboBox::drop-down {{
 }}
 """
 
-# --- Custom Log Handler to bridge Python logging to PyQt ---
 class QLogSignal(QThread):
     new_log = pyqtSignal(str)
 
@@ -152,21 +154,20 @@ class QLogHandler(logging.Handler):
         msg = self.format(record)
         self.signal_emitter.new_log.emit(msg)
 
-# --- Background Worker Thread ---
 class BenchmarkWorker(QThread):
-    progress_update = pyqtSignal(str, str, bool, str, int)  # row_id, domain, success, text, time_val
     finished_scan = pyqtSignal()
 
-    def __init__(self, dns_list, domains, timeout, workers):
+    def __init__(self, dns_list, domains, timeout, workers, result_queue):
         super().__init__()
         self.dns_list = dns_list
         self.domains = domains
         self.timeout = timeout
         self.max_workers = workers
+        self.result_queue = result_queue
         self._is_running = True
 
     def run(self):
-        logger.info(f"Starting benchmark worker: {len(self.dns_list)} IPs, {len(self.domains)} Domains.")
+        logger.info(f"Starting benchmark worker pool: {len(self.dns_list)} IPs, {len(self.domains)} Domains.")
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as exe:
             future_map = {}
             for d in self.dns_list:
@@ -180,17 +181,16 @@ class BenchmarkWorker(QThread):
                 row_id, domain = future_map[future]
                 try:
                     success, text, t_val = future.result()
-                    self.progress_update.emit(row_id, domain, success, text, t_val)
-                except Exception as e:
-                    self.progress_update.emit(row_id, domain, False, "Err", 0)
+                    self.result_queue.put((row_id, domain, success, text, t_val))
+                except Exception:
+                    self.result_queue.put((row_id, domain, False, "Err", 0))
 
+        self.result_queue.put("DONE")
         self.finished_scan.emit()
 
     def stop(self):
         self._is_running = False
 
-
-# --- Custom Input Dialogs ---
 class AddDNSDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -204,7 +204,7 @@ class AddDNSDialog(QDialog):
         self.ip_input.setPlaceholderText("e.g., 1.1.1.1")
         
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("e.g., Cloudflare (Optional)")
+        self.name_input.setPlaceholderText("e.g., Cloudflare")
         
         form.addRow("IP Address:", self.ip_input)
         form.addRow("Provider Name:", self.name_input)
@@ -223,8 +223,6 @@ class AddDNSDialog(QDialog):
             return None
         return f"{ip} {name}".strip()
 
-
-# --- Preferences Window (Modal Dialog) ---
 class PreferencesWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -252,7 +250,6 @@ class PreferencesWindow(QDialog):
         layout = QVBoxLayout(self.tab_profiles)
         layout.setContentsMargins(15, 20, 15, 15)
         
-        # Profile Selector
         top_layout = QHBoxLayout()
         top_layout.addWidget(QLabel("Select Profile:"))
         self.combo_profile = QComboBox()
@@ -266,7 +263,6 @@ class PreferencesWindow(QDialog):
         top_layout.addWidget(btn_new_prof)
         layout.addLayout(top_layout)
 
-        # Lists Grid
         grid = QGridLayout()
         grid.addWidget(QLabel("<b>DNS Servers</b>"), 0, 0)
         grid.addWidget(QLabel("<b>Domains</b>"), 0, 1)
@@ -280,7 +276,6 @@ class PreferencesWindow(QDialog):
         grid.addWidget(self.list_domains, 1, 1)
         grid.addWidget(self.list_nets, 1, 2)
 
-        # Add/Remove Buttons
         def make_controls(list_widget, add_callback):
             h = QHBoxLayout()
             b_add = QPushButton("+")
@@ -294,12 +289,11 @@ class PreferencesWindow(QDialog):
             return h
 
         grid.addLayout(make_controls(self.list_dns, self.add_dns_item), 2, 0)
-        grid.addLayout(make_controls(self.list_domains, lambda: self.add_simple_item(self.list_domains, "Domain (e.g., google.com)")), 2, 1)
+        grid.addLayout(make_controls(self.list_domains, lambda: self.add_simple_item(self.list_domains, "Domain")), 2, 1)
         grid.addLayout(make_controls(self.list_nets, lambda: self.add_simple_item(self.list_nets, "Network Name")), 2, 2)
 
         layout.addLayout(grid)
 
-        # Save Action
         btn_save = QPushButton("💾 Save Profile")
         btn_save.setObjectName("successBtn")
         btn_save.clicked.connect(self.save_profile_from_gui)
@@ -308,7 +302,7 @@ class PreferencesWindow(QDialog):
         self.load_selected_profile_to_gui(self.combo_profile.currentText())
 
     def create_new_profile(self):
-        name, ok = QInputDialog.getText(self, "New Profile", "Enter profile name (e.g., Gaming):")
+        name, ok = QInputDialog.getText(self, "New Profile", "Enter profile name:")
         if ok and name:
             clean = "".join([c for c in name if c.isalnum() or c in "_-"]).strip()
             filename = f"config_{clean}.txt"
@@ -355,7 +349,7 @@ class PreferencesWindow(QDialog):
             "network_list": [self.list_nets.item(i).text() for i in range(self.list_nets.count())]
         }
         ConfigManager.save_single_profile(filename, data)
-        QMessageBox.information(self, "Success", f"Profile {filename} saved successfully.")
+        QMessageBox.information(self, "Success", f"Profile configuration written successfully to workspace directory.")
         if self.parent_app:
             self.parent_app.refresh_profile_list()
             self.parent_app.reload_active_profiles()
@@ -386,7 +380,6 @@ class PreferencesWindow(QDialog):
         if self.parent_app:
             self.parent_app.current_timeout = float(self.input_timeout.text())
             self.parent_app.current_workers = int(self.input_threads.text())
-            logger.info(f"Settings updated: Timeout={self.parent_app.current_timeout}, Threads={self.parent_app.current_workers}")
             QMessageBox.information(self, "Applied", "Settings applied for next scan.")
 
     def build_about_tab(self):
@@ -406,7 +399,7 @@ class PreferencesWindow(QDialog):
         
         layout.addSpacing(20)
 
-        lbl_desc = QLabel("A highly optimized, multi-threaded Windows networking utility engineered for accurate DNS latency benchmarking and profile workflow management.")
+        lbl_desc = QLabel("A highly optimized, multi-threaded Windows networking utility engineered for accurate DNS latency benchmarking.")
         lbl_desc.setWordWrap(True)
         lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_desc.setStyleSheet(f"color: {C_TEXT_MUTED};")
@@ -421,19 +414,21 @@ class PreferencesWindow(QDialog):
 
         layout.addSpacing(30)
 
-        # Native Link Button
         btn_github = QPushButton("🌐 View Source on GitHub")
         btn_github.setFixedWidth(240)
         btn_github.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/bluefalcon2270/bluefalcon-dns-benchmark")))
         layout.addWidget(btn_github, alignment=Qt.AlignmentFlag.AlignCenter)
 
 
-# --- Main Application Window ---
 class ModernDNSApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"BlueFalcon DNS Benchmark Pro v{APP_VERSION}")
         self.setMinimumSize(1050, 700)
+        
+        icon_path = AppUtils.get_resource_path("icon.ico")
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         
         # Pre-Flight Checks
         if not AppUtils.is_admin():
@@ -455,20 +450,28 @@ class ModernDNSApp(QMainWindow):
         self.total_tasks = 0
         self.completed_tasks = 0
         self.worker = None
+        self.is_scanning = False
+
+        self.result_queue = queue.Queue()
+        self.queue_timer = QTimer()
+        self.queue_timer.timeout.connect(self.process_queue)
 
         self.init_ui()
         self.setup_logging_bridge()
         
-        # Load default profile on start
-        default_prof = ConfigManager.get_available_profiles()[0]
-        self.active_profiles = [default_prof]
-        self.refresh_profile_list()
-        self.reload_active_profiles()
+        available = ConfigManager.get_available_profiles()
+        if available:
+            self.active_profiles = [available[0]]
+            self.refresh_profile_list()
+            self.reload_active_profiles()
+
+    def _create_centered_item(self, text: str) -> QTableWidgetItem:
+        item = QTableWidgetItem(text)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        return item
 
     def set_progress_state(self, state: str):
-        """ Dynamically recolor the progress bar based on engine state """
         base_style = f"QProgressBar {{ border: 1px solid {C_BORDER}; border-radius: 4px; text-align: center; background-color: {C_CONTAINER}; "
-        
         if state == "idle":
             color = "#5F6368"
             text_color = C_TEXT_MAIN
@@ -493,7 +496,6 @@ class ModernDNSApp(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(20, 20, 20, 20)
 
-        # M3 Top Control Bar (Consolidated)
         top_bar = QHBoxLayout()
         top_bar.setSpacing(15)
 
@@ -525,24 +527,21 @@ class ModernDNSApp(QMainWindow):
         self.combo_profile_main.currentTextChanged.connect(self.switch_profile)
         top_bar.addWidget(self.combo_profile_main)
 
-        # Circular Icon Button for Preferences
         btn_prefs = QPushButton("⚙")
         btn_prefs.setObjectName("iconBtn")
         btn_prefs.setToolTip("Preferences")
-        btn_prefs.setFixedSize(36, 36)
+        btn_prefs.setFixedSize(40, 40)
         btn_prefs.clicked.connect(self.open_preferences)
         top_bar.addWidget(btn_prefs)
 
         main_layout.addLayout(top_bar)
         main_layout.addSpacing(10)
 
-        # Main Workspace Tab
         self.workspace = QTabWidget()
         
-        # Corner Sort Button with Icon
         btn_sort = QPushButton("⇕")
         btn_sort.setObjectName("sortBtn")
-        btn_sort.setToolTip("Sort by lowest errors and response time")
+        btn_sort.setToolTip("Sort")
         btn_sort.clicked.connect(self.sort_results)
         self.workspace.setCornerWidget(btn_sort, Qt.Corner.TopRightCorner)
 
@@ -552,16 +551,14 @@ class ModernDNSApp(QMainWindow):
         self.workspace.addTab(self.tab_table, "📊 Live Results")
         self.workspace.addTab(self.tab_logs, "📝 System Logs")
 
-        # Setup Table Tab
         table_layout = QVBoxLayout(self.tab_table)
         table_layout.setContentsMargins(0, 10, 0, 0)
         self.table = QTableWidget()
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False) # M3 aesthetic
+        self.table.setShowGrid(False)
         table_layout.addWidget(self.table)
 
-        # Setup Logs Tab
         log_layout = QVBoxLayout(self.tab_logs)
         log_layout.setContentsMargins(0, 10, 0, 0)
         self.log_viewer = QTextEdit()
@@ -577,7 +574,6 @@ class ModernDNSApp(QMainWindow):
         handler = QLogHandler(self.log_signal)
         handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s", "%H:%M:%S"))
         logger.addHandler(handler)
-        logger.info("Application initialized. GUI Logging active.")
 
     @pyqtSlot(str)
     def append_log(self, msg):
@@ -615,7 +611,6 @@ class ModernDNSApp(QMainWindow):
         self.combo_net.addItems(self.networks)
 
         self.build_table_headers()
-        logger.info(f"Loaded profile: {self.active_profiles[0]}. Found {len(self.dns_list)} DNS targets and {len(self.domains)} domains.")
 
     def build_table_headers(self):
         self.table.clear()
@@ -627,11 +622,11 @@ class ModernDNSApp(QMainWindow):
 
         for row, info in enumerate(self.dns_list):
             sys_mark = " ★" if info['is_system'] else ""
-            self.table.setItem(row, 0, QTableWidgetItem(f"{info['ip']} {info['name']}{sys_mark}"))
-            self.table.setItem(row, 1, QTableWidgetItem("-"))
-            self.table.setItem(row, 2, QTableWidgetItem("-"))
+            self.table.setItem(row, 0, self._create_centered_item(f"{info['ip']} {info['name']}{sys_mark}"))
+            self.table.setItem(row, 1, self._create_centered_item("-"))
+            self.table.setItem(row, 2, self._create_centered_item("-"))
             for col in range(len(self.domains)):
-                self.table.setItem(row, 3 + col, QTableWidgetItem("..."))
+                self.table.setItem(row, 3 + col, self._create_centered_item("..."))
 
     def toggle_scan(self):
         if self.worker and self.worker.isRunning():
@@ -639,13 +634,14 @@ class ModernDNSApp(QMainWindow):
             self.btn_start.setEnabled(False)
             self.lbl_status.setText("Aborting...")
             self.set_progress_state("aborted")
-            logger.warning("Scan aborted by user.")
+            self.is_scanning = False
             return
 
         if not self.dns_list or not self.domains:
-            QMessageBox.warning(self, "Warning", "Configuration empty. Add data via Preferences.")
+            QMessageBox.warning(self, "Warning", "Configuration lists are currently empty.")
             return
 
+        self.is_scanning = True
         self.results_data = {d["row_id"]: {} for d in self.dns_list}
         self.total_tasks = len(self.dns_list) * len(self.domains)
         self.completed_tasks = 0
@@ -658,34 +654,43 @@ class ModernDNSApp(QMainWindow):
 
         self.btn_start.setText("🛑 Stop Scan")
         self.btn_start.setObjectName("dangerBtn")
-        self.btn_start.setStyleSheet("") # Force repaint
+        self.btn_start.setStyleSheet("") 
         self.lbl_status.setText("Benchmarking...")
-        self.lbl_status.setStyleSheet(f"color: {C_PRIMARY}; font-weight: bold; font-size: 13px;")
+        self.lbl_status.setStyleSheet(f"color: {C_PRIMARY}; font-weight: bold;")
 
-        self.worker = BenchmarkWorker(self.dns_list, self.domains, self.current_timeout, self.current_workers)
-        self.worker.progress_update.connect(self.handle_progress)
+        self.result_queue.queue.clear()
+        self.worker = BenchmarkWorker(self.dns_list, self.domains, self.current_timeout, self.current_workers, self.result_queue)
         self.worker.finished_scan.connect(self.scan_finished)
         self.worker.start()
+        self.queue_timer.start(30)
 
-    @pyqtSlot(str, str, bool, str, int)
-    def handle_progress(self, row_id, domain, success, text, time_val):
+    def _process_single_result(self, item):
+        row_id, domain, success, text, time_val = item
+        
         self.completed_tasks += 1
         self.progress_bar.setValue(self.completed_tasks)
         
         self.results_data[row_id][domain] = {"success": success, "text": text, "time": time_val}
         
-        # Find row index
         row_idx = int(row_id.split('_')[1])
         dom_idx = self.domains.index(domain)
         
-        item = QTableWidgetItem(text)
+        cell_item = self._create_centered_item(text)
         if success:
-            item.setForeground(QColor(C_SUCCESS))
+            cell_item.setForeground(QColor(C_SUCCESS))
         else:
-            item.setForeground(QColor(C_ERROR))
-        self.table.setItem(row_idx, 3 + dom_idx, item)
+            cell_item.setForeground(QColor(C_ERROR))
+        self.table.setItem(row_idx, 3 + dom_idx, cell_item)
 
         self.recalculate_row_metrics(row_idx, row_id)
+
+    def process_queue(self):
+        processed = 0
+        while not self.result_queue.empty() and processed < 50:
+            item = self.result_queue.get_nowait()
+            if item != "DONE":
+                self._process_single_result(item)
+            processed += 1
 
     def recalculate_row_metrics(self, row_idx, row_id):
         row_res = self.results_data[row_id]
@@ -700,8 +705,8 @@ class ModernDNSApp(QMainWindow):
         failures = total_domains - successes
         avg_ping = "Failed" if successes == 0 else f"{round(total_time / successes)} ms"
 
-        pi = QTableWidgetItem(avg_ping)
-        ei = QTableWidgetItem(str(failures))
+        pi = self._create_centered_item(avg_ping)
+        ei = self._create_centered_item(str(failures))
         
         if failures == 0: ei.setForeground(QColor(C_SUCCESS))
         elif failures <= 2: ei.setForeground(QColor(C_WARNING))
@@ -712,9 +717,17 @@ class ModernDNSApp(QMainWindow):
 
     @pyqtSlot()
     def scan_finished(self):
+        self.queue_timer.stop()
+        
+        while not self.result_queue.empty():
+            item = self.result_queue.get_nowait()
+            if item != "DONE":
+                self._process_single_result(item)
+
         self.btn_start.setEnabled(True)
         self.combo_net.setEnabled(True)
         self.combo_profile_main.setEnabled(True)
+        self.is_scanning = False
         
         self.btn_start.setText("🚀 Start Benchmark")
         self.btn_start.setObjectName("")
@@ -722,10 +735,9 @@ class ModernDNSApp(QMainWindow):
         
         self.set_progress_state("success")
         self.lbl_status.setText("Scan Complete. Saving...")
-        self.lbl_status.setStyleSheet(f"color: {C_SUCCESS}; font-weight: bold; font-size: 13px;")
+        self.lbl_status.setStyleSheet(f"color: {C_SUCCESS}; font-weight: bold;")
         self._save_to_history()
         self.lbl_status.setText("Scan Complete & Saved.")
-        logger.info("Benchmark cycle completed.")
 
     def _save_to_history(self):
         network = self.combo_net.currentText()
@@ -747,11 +759,11 @@ class ModernDNSApp(QMainWindow):
                     
                     writer.writerow([timestamp, network, info["ip"], info["name"], err_val, ping_val])
         except Exception as e:
-            logger.error(f"Failed to save history CSV: {e}")
+            logger.error(f"Failed to append to global spreadsheet data: {e}")
 
     def sort_results(self):
         if not self.results_data or (self.worker and self.worker.isRunning()):
-            QMessageBox.information(self, "Info", "Complete a scan before sorting.")
+            QMessageBox.information(self, "Info", "Complete a baseline run before sorting metrics.")
             return
 
         def get_sort_key(info):
@@ -774,7 +786,7 @@ class ModernDNSApp(QMainWindow):
             self.recalculate_row_metrics(row_idx, row_id)
             for dom, res in dom_data.items():
                 dom_idx = self.domains.index(dom)
-                item = QTableWidgetItem(res.get("text", "-"))
+                item = self._create_centered_item(res.get("text", "-"))
                 if res.get("success"):
                     item.setForeground(QColor(C_SUCCESS))
                 else:
@@ -782,10 +794,7 @@ class ModernDNSApp(QMainWindow):
                 self.table.setItem(row_idx, 3 + dom_idx, item)
 
     def closeEvent(self, event):
-        """ Graceful application shutdown intercept. """
-        logger.info("Application close requested. Cleaning up threads...")
         if self.worker and self.worker.isRunning():
             self.worker.stop()
             self.worker.wait()
-        logger.info("Shutdown complete.")
         event.accept()
