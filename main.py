@@ -21,7 +21,7 @@ def main():
     
     app = QApplication(sys.argv)
     
-    # Inject Universal Native Windows Taskbar Icon
+    # Inject Universal Native Windows Taskbar Icon explicitly matching shell parameters
     icon_path = AppUtils.get_resource_path("icon.ico")
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))

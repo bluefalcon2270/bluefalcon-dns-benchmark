@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 import dns.resolver
 
-APP_VERSION = "2.2.1"
+APP_VERSION = "2.3"
 
 # Setup Paths - Force CWD so files are always created next to the execution context
 BASE_DIR = Path.cwd()
@@ -102,11 +102,13 @@ class NetworkUtils:
     def test_dns_domain(dns_ip: str, domain: str, timeout: float) -> tuple[bool, str, int]:
         resolver = dns.resolver.Resolver(configure=False)
         resolver.nameservers = [dns_ip]
-        resolver.timeout = timeout
-        resolver.lifetime = timeout
+        
+        # Enforce strict performance limits to prevent dead DNS routing latency
+        resolver.timeout = float(timeout)
+        resolver.lifetime = float(timeout)
         
         try:
-            ans = resolver.resolve(domain, "A")
+            ans = resolver.resolve(domain, "A", lifetime=timeout)
             ips = [x.to_text() for x in ans]
             if not ips: 
                 return False, "No IP", 0
@@ -121,7 +123,7 @@ class NetworkUtils:
         except dns.resolver.NoAnswer: return False, "No Answer", 0
         except dns.resolver.NoNameservers: return False, "ServFail", 0
         except dns.exception.Timeout: return False, "DNS Timeout", 0
-        except Exception as e: return False, "?", 0
+        except Exception: return False, "?", 0
 
 
 class ConfigManager:

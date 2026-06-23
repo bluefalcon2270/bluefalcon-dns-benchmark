@@ -167,11 +167,13 @@ class BenchmarkWorker(QThread):
         self._is_running = True
 
     def run(self):
-        logger.info(f"Starting benchmark worker pool: {len(self.dns_list)} IPs, {len(self.domains)} Domains.")
+        logger.info(f"Initializing standard concurrent lookup mapping thread architecture.")
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as exe:
             future_map = {}
             for d in self.dns_list:
                 for dom in self.domains:
+                    if not self._is_running:
+                        break
                     f = exe.submit(NetworkUtils.test_dns_domain, d["ip"], dom, self.timeout)
                     future_map[f] = (d["row_id"], dom)
 
@@ -430,14 +432,12 @@ class ModernDNSApp(QMainWindow):
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
         
-        # Pre-Flight Checks
         if not AppUtils.is_admin():
             logger.warning("Application launched without Administrator privileges. Some WMI queries may fail.")
         if not AppUtils.check_internet_connection():
             logger.warning("No internet connection detected. Scans will likely fail.")
             QMessageBox.warning(self, "Offline", "No active internet connection detected. Proceed with caution.")
 
-        # App State
         self.current_timeout = 5.0
         self.current_workers = 1000
         self.active_profiles = []
@@ -629,12 +629,27 @@ class ModernDNSApp(QMainWindow):
                 self.table.setItem(row, 3 + col, self._create_centered_item("..."))
 
     def toggle_scan(self):
-        if self.worker and self.worker.isRunning():
-            self.worker.stop()
-            self.btn_start.setEnabled(False)
-            self.lbl_status.setText("Aborting...")
-            self.set_progress_state("aborted")
+        if self.is_scanning:
             self.is_scanning = False
+            self.lbl_status.setText("Aborting immediately...")
+            self.set_progress_state("aborted")
+            
+            if self.worker:
+                self.worker.stop()
+                
+            self.queue_timer.stop()
+            
+            # Immediately purge hanging values out of the queue to drop resource overhead
+            while not self.result_queue.empty():
+                try: self.result_queue.get_nowait()
+                except queue.Empty: break
+                    
+            self.btn_start.setEnabled(True)
+            self.btn_start.setText("🚀 Start Benchmark")
+            self.btn_start.setObjectName("")
+            self.btn_start.setStyleSheet("")
+            self.combo_net.setEnabled(True)
+            self.combo_profile_main.setEnabled(True)
             return
 
         if not self.dns_list or not self.domains:
@@ -658,7 +673,10 @@ class ModernDNSApp(QMainWindow):
         self.lbl_status.setText("Benchmarking...")
         self.lbl_status.setStyleSheet(f"color: {C_PRIMARY}; font-weight: bold;")
 
-        self.result_queue.queue.clear()
+        while not self.result_queue.empty():
+            try: self.result_queue.get_nowait()
+            except queue.Empty: break
+
         self.worker = BenchmarkWorker(self.dns_list, self.domains, self.current_timeout, self.current_workers, self.result_queue)
         self.worker.finished_scan.connect(self.scan_finished)
         self.worker.start()
@@ -670,6 +688,9 @@ class ModernDNSApp(QMainWindow):
         self.completed_tasks += 1
         self.progress_bar.setValue(self.completed_tasks)
         
+        if row_id not in self.results_data:
+            return
+            
         self.results_data[row_id][domain] = {"success": success, "text": text, "time": time_val}
         
         row_idx = int(row_id.split('_')[1])
@@ -686,13 +707,18 @@ class ModernDNSApp(QMainWindow):
 
     def process_queue(self):
         processed = 0
-        while not self.result_queue.empty() and processed < 50:
-            item = self.result_queue.get_nowait()
-            if item != "DONE":
+        while not self.result_queue.empty() and processed < 75:
+            try:
+                item = self.result_queue.get_nowait()
+                if item == "DONE":
+                    break
                 self._process_single_result(item)
+            except queue.Empty:
+                break
             processed += 1
 
     def recalculate_row_metrics(self, row_idx, row_id):
+        if row_id not in self.results_data: return
         row_res = self.results_data[row_id]
         successes, total_time, total_domains = 0, 0, len(self.domains)
         
@@ -720,24 +746,28 @@ class ModernDNSApp(QMainWindow):
         self.queue_timer.stop()
         
         while not self.result_queue.empty():
-            item = self.result_queue.get_nowait()
-            if item != "DONE":
-                self._process_single_result(item)
+            try:
+                item = self.result_queue.get_nowait()
+                if item != "DONE":
+                    self._process_single_result(item)
+            except queue.Empty:
+                break
 
         self.btn_start.setEnabled(True)
         self.combo_net.setEnabled(True)
         self.combo_profile_main.setEnabled(True)
-        self.is_scanning = False
         
-        self.btn_start.setText("🚀 Start Benchmark")
-        self.btn_start.setObjectName("")
-        self.btn_start.setStyleSheet("")
-        
-        self.set_progress_state("success")
-        self.lbl_status.setText("Scan Complete. Saving...")
-        self.lbl_status.setStyleSheet(f"color: {C_SUCCESS}; font-weight: bold;")
-        self._save_to_history()
-        self.lbl_status.setText("Scan Complete & Saved.")
+        if self.is_scanning:
+            self.is_scanning = False
+            self.btn_start.setText("🚀 Start Benchmark")
+            self.btn_start.setObjectName("")
+            self.btn_start.setStyleSheet("")
+            
+            self.set_progress_state("success")
+            self.lbl_status.setText("Scan Complete. Saving...")
+            self.lbl_status.setStyleSheet(f"color: {C_SUCCESS}; font-weight: bold; font-size: 13px;")
+            self._save_to_history()
+            self.lbl_status.setText("Scan Complete & Saved.")
 
     def _save_to_history(self):
         network = self.combo_net.currentText()
