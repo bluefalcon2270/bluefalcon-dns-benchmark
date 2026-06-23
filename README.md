@@ -5,7 +5,7 @@
 **A professional Windows desktop utility to benchmark DNS latency, evaluate packet loss, and aggregate ISP analytics.**
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6?style=for-the-badge&logo=windows&logoColor=white)
-[![Version](https://img.shields.io/badge/Version-v1.0-007AFF?style=for-the-badge)](https://github.com/bluefalcon2270/bluefalcon-dns-benchmark/releases)
+[![Version](https://img.shields.io/badge/Version-v1.2-007AFF?style=for-the-badge)](https://github.com/bluefalcon2270/bluefalcon-dns-benchmark/releases)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 [![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://www.youtube.com/@BlueFalcon2270)
 
@@ -20,7 +20,7 @@ A high-performance, multi-threaded Windows desktop application designed to take 
 
 **Step 1: Download**
 * Navigate to the **Releases** section on the right side of this repository.
-* Download the compiled `BlueFalcon_DNS_Benchmark_Pro_v1.0.exe`. No installation is required.
+* Download the compiled `BlueFalcon_DNS_Benchmark_Pro_v1.2.exe`. No installation is required.
 
 **Step 2: First Launch**
 * Place the `.exe` inside a dedicated folder anywhere on your computer.
@@ -35,11 +35,11 @@ A high-performance, multi-threaded Windows desktop application designed to take 
 
 ## 🌟 Architecture & Core Modules
 
-Built inside a highly optimized, single-file structure (`main.py`) using **CustomTkinter** for a native Material Design 3 Dark aesthetic:
+Built on a modular **Model-View-Controller** design pattern using **CustomTkinter** for a native Material Design 3 Dark aesthetic:
 
-* `NetworkUtils`: The resolution engine. Handles the `concurrent.futures` thread pool, raw `socket` TCP handshakes, and native `dns.resolver` domain probes.
-* `ConfigManager`: The workspace parser. Manages zero-friction I/O operations for local text profiles and handles multi-file dataset merges on the fly.
-* `ScrollableTable`: A custom-bound Canvas view engineered to keep the UI entirely freeze-free even when rendering hundreds of live, rapidly updating data rows.
+* `main.py`: Entry point launcher and Windows Taskbar `AppUserModelID` overriding injection.
+* `core.py`: The backend engine. Handles `concurrent.futures` pooling, raw TCP handshakes, native `dns.resolver` probes, and zero-friction I/O config management.
+* `gui.py`: The rendering interface. Features a custom-bound Canvas view engineered to keep the UI entirely freeze-free even when processing hundreds of live updates.
 
 <br>
 
@@ -65,12 +65,13 @@ Ensure you are running **Python 3.10+** on Windows.
 
 ### PyInstaller Compilation (.exe)
 
-To pack the source script into a standalone executable for Windows distribution, open your terminal in the project root and run:
+When packing a multi-file Python project, point PyInstaller **strictly at the entry point**. It will analyze the AST and swallow `core.py` and `gui.py` automatically. 
 
-```cmd
-pyinstaller --noconsole --onefile --name "BlueFalcon_DNS_Benchmark_Pro_v1.0" "main.py"
+Run this exact command in PowerShell to bundle the scripts and inject your universal `.ico` asset into the runtime extraction path:
+
+```powershell
+pyinstaller --noconsole --onefile --icon="icon.ico" --add-data='icon.ico;.' --name="BlueFalcon_DNS_Benchmark_Pro_v1.2" main.py
 ```
-*(Note: If you assign an application icon to the project later, append `--icon="icon.ico"` to the command).*
 
 <br>
 
