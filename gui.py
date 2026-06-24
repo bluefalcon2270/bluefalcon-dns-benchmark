@@ -4,6 +4,7 @@ import queue
 import concurrent.futures
 import csv
 import re
+import webbrowser
 import tkinter as tk
 import customtkinter as ctk
 from tkinter import messagebox, filedialog, simpledialog
@@ -15,20 +16,20 @@ from core import NetworkUtils, ConfigManager
 # ==========================================
 # Application Configuration & Constants
 # ==========================================
-APP_VERSION = "35.0"
+APP_VERSION = "37.0"
 
-# Material Design 3 Dark Theme Colors
-C_BG = "#121212"
-C_CARD = "#1E1E1E"
-C_PRIMARY = "#A8C7FA"      # Light Blue
-C_PRIMARY_BG = "#0742A0"   # Dark Blue
-C_SUCCESS = "#81C995"      # Green
-C_ERROR = "#F28B82"        # Red
-C_WARNING = "#FDD663"      # Yellow
-C_PRO = "#FFD700"          # Gold/Pro
-C_TEXT_MAIN = "#E3E3E3"
-C_TEXT_MUTED = "#8E918F"
-C_BORDER = "#444746"
+# Material Design 3 (Google) Dark Theme Colors
+C_BG = "#131314"            # Deep App Background
+C_CARD = "#1E1F20"          # Surface/Card Color
+C_PRIMARY = "#A8C7FA"       # MD3 Light Blue Text
+C_PRIMARY_BG = "#0A56D1"    # MD3 Dark Blue Button
+C_SUCCESS = "#81C995"       # MD3 Green
+C_ERROR = "#F28B82"         # MD3 Red
+C_WARNING = "#FDE293"       # MD3 Yellow
+C_PRO = "#FFD700"           # Gold/Pro
+C_TEXT_MAIN = "#E2E2E2"     # Main Text
+C_TEXT_MUTED = "#C4C7C5"    # Muted/Secondary Text
+C_BORDER = "#444746"        # MD3 Outline/Border
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -38,17 +39,17 @@ ctk.set_default_color_theme("blue")
 # ==========================================
 class ScrollableTable(ctk.CTkFrame):
     def __init__(self, master, **kwargs):
-        super().__init__(master, fg_color=C_CARD, corner_radius=16, **kwargs)
+        super().__init__(master, fg_color=C_CARD, corner_radius=24, **kwargs)
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
         self.canvas = tk.Canvas(self, bg=C_CARD, highlightthickness=0)
-        self.canvas.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        self.canvas.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
         self.v_scroll = ctk.CTkScrollbar(self, orientation="vertical", command=self.canvas.yview)
-        self.v_scroll.grid(row=0, column=1, sticky="ns", pady=5, padx=(0,5))
+        self.v_scroll.grid(row=0, column=1, sticky="ns", pady=10, padx=(0,10))
         self.h_scroll = ctk.CTkScrollbar(self, orientation="horizontal", command=self.canvas.xview)
-        self.h_scroll.grid(row=1, column=0, sticky="ew", padx=5, pady=(0,5))
+        self.h_scroll.grid(row=1, column=0, sticky="ew", padx=10, pady=(0,10))
 
         self.canvas.configure(yscrollcommand=self.v_scroll.set, xscrollcommand=self.h_scroll.set)
         self.inner_frame = ctk.CTkFrame(self.canvas, fg_color="transparent")
@@ -79,7 +80,7 @@ class ModernDNSApp(ctk.CTk):
         self.configure(fg_color=C_BG)
 
         # State Variables
-        self.display_mode = "live" # Can be "live" or "history"
+        self.display_mode = "live"
         self.history_results = []
         
         self.config_data = {"dns_list": [], "domain_list": [], "network_list": []}
@@ -104,66 +105,56 @@ class ModernDNSApp(ctk.CTk):
         self.current_workers = 1000
         
         self.selected_network_var = tk.StringVar(value="Default")
+        self.selected_profile_var = tk.StringVar(value="Default")
 
         self.build_ui()
+        
+        profiles = ConfigManager.get_available_profiles()
+        if profiles:
+            self.combo_profile.configure(values=profiles)
+            self.combo_profile.set(profiles[0])
+            self.load_selected_profiles([profiles[0]])
+
         self.build_grid()
         self.process_queue()
 
     def build_ui(self):
-        # Top App Bar
-        self.app_bar = ctk.CTkFrame(self, fg_color="transparent")
-        self.app_bar.pack(fill="x", padx=30, pady=(25, 15))
-        
-        title_frame = ctk.CTkFrame(self.app_bar, fg_color="transparent")
-        title_frame.pack(side="left")
-        
-        ctk.CTkLabel(title_frame, text="🌐", font=("Segoe UI Emoji", 28)).pack(side="left", padx=(0, 10))
-        ctk.CTkLabel(title_frame, text="DNS Benchmark", font=("Helvetica", 24, "bold"), text_color=C_TEXT_MAIN).pack(side="left")
-        ctk.CTkLabel(title_frame, text="Pro", font=("Helvetica", 24, "bold"), text_color=C_PRO).pack(side="left", padx=(6, 0))
-        ctk.CTkLabel(title_frame, text=f"v{APP_VERSION}", font=("Segoe UI", 12, "italic"), text_color=C_TEXT_MUTED).pack(side="left", padx=(10,0), pady=(8,0))
+        # Control Card (Unified Top Bar MD3 Style)
+        self.control_card = ctk.CTkFrame(self, fg_color=C_CARD, corner_radius=24)
+        self.control_card.pack(fill="x", padx=30, pady=(30, 20), ipady=12)
 
-        btn_frame = ctk.CTkFrame(self.app_bar, fg_color="transparent")
-        btn_frame.pack(side="right")
+        self.btn_start = ctk.CTkButton(self.control_card, text="🚀 Start Benchmark", font=("Segoe UI", 14, "bold"),
+                                       command=self.toggle_scan, fg_color=C_PRIMARY_BG, text_color=C_TEXT_MAIN, 
+                                       hover_color="#0842A0", corner_radius=24, width=160, height=40)
+        self.btn_start.pack(side="left", padx=(20, 10), pady=10)
         
-        ctk.CTkButton(btn_frame, text="📂 Profiles", font=("Helvetica", 14, "bold"), command=self.open_profiles_manager, 
-                      fg_color=C_PRIMARY_BG, hover_color="#063580", text_color=C_PRIMARY, corner_radius=20, width=100, height=36).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="📊 History", font=("Helvetica", 14, "bold"), command=self.open_history, 
-                      fg_color=C_SUCCESS, hover_color="#6BBA80", text_color=C_BG, corner_radius=20, width=100, height=36).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="⚙️ Settings", font=("Helvetica", 14, "bold"), command=self.open_settings, 
-                      fg_color=C_CARD, hover_color=C_BORDER, border_width=1, border_color=C_BORDER, corner_radius=20, width=100, height=36).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="ℹ️ About", font=("Helvetica", 14, "bold"), command=self.open_about, 
-                      fg_color=C_CARD, hover_color=C_BORDER, border_width=1, border_color=C_BORDER, corner_radius=20, width=80, height=36).pack(side="left", padx=5)
+        self.progress_bar = ctk.CTkProgressBar(self.control_card, width=150, height=8, progress_color=C_PRIMARY, fg_color=C_BG)
+        self.progress_bar.pack(side="left", padx=(0, 10))
+        self.progress_bar.set(0)
 
-        # Control Card
-        self.control_card = ctk.CTkFrame(self, fg_color=C_CARD, corner_radius=16)
-        self.control_card.pack(fill="x", padx=30, pady=(0, 20), ipady=10)
-
-        self.btn_start = ctk.CTkButton(self.control_card, text="🚀 Start Benchmark", font=("Helvetica", 15, "bold"),
-                                       command=self.toggle_scan, fg_color=C_PRIMARY_BG, text_color=C_PRIMARY, 
-                                       hover_color="#063580", corner_radius=20, width=180, height=42)
-        self.btn_start.pack(side="left", padx=20, pady=10)
+        self.lbl_status = ctk.CTkLabel(self.control_card, text="Waiting for profile load...", text_color=C_WARNING, font=("Segoe UI", 13, "bold"))
+        self.lbl_status.pack(side="left", padx=(0, 15))
         
-        ctk.CTkLabel(self.control_card, text="Network:", font=("Helvetica", 13, "bold"), text_color=C_TEXT_MUTED).pack(side="left", padx=(5, 5))
-        self.combo_network = ctk.CTkComboBox(self.control_card, variable=self.selected_network_var, values=["Default"], width=130, fg_color=C_BG)
+        ctk.CTkLabel(self.control_card, text="Network:", font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED).pack(side="left", padx=(5, 5))
+        self.combo_network = ctk.CTkComboBox(self.control_card, variable=self.selected_network_var, values=["Default"], width=120, height=36, fg_color=C_BG, corner_radius=8, border_color=C_BORDER)
         self.combo_network.pack(side="left", padx=(0, 15))
 
-        self.progress_bar = ctk.CTkProgressBar(self.control_card, width=200, height=8, progress_color=C_PRIMARY, fg_color=C_BG)
-        self.progress_bar.pack(side="left", padx=10)
-        self.progress_bar.set(0)
-        
-        self.lbl_progress_text = ctk.CTkLabel(self.control_card, text="", text_color=C_PRIMARY, font=("Helvetica", 13, "bold"))
-        self.lbl_progress_text.pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(self.control_card, text="Profile:", font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED).pack(side="left", padx=(5, 5))
+        self.combo_profile = ctk.CTkComboBox(self.control_card, variable=self.selected_profile_var, values=["Default"], width=120, height=36, fg_color=C_BG, corner_radius=8, border_color=C_BORDER, command=lambda e: self.load_selected_profiles([self.selected_profile_var.get()]))
+        self.combo_profile.pack(side="left", padx=(0, 15))
 
-        self.lbl_status = ctk.CTkLabel(self.control_card, text="Waiting for profile load...", text_color=C_WARNING, font=("Helvetica", 14, "bold"))
-        self.lbl_status.pack(side="left", padx=10)
+        # Preferences / Gear Button
+        self.btn_prefs = ctk.CTkButton(self.control_card, text="⚙️", font=("Segoe UI Emoji", 24), command=self.open_preferences,
+                                      fg_color="transparent", text_color=C_TEXT_MAIN, hover_color=C_BORDER, corner_radius=24, width=44, height=44)
+        self.btn_prefs.pack(side="right", padx=(5, 20))
 
-        self.btn_sort = ctk.CTkButton(self.control_card, text="⏬ Sort Results", font=("Helvetica", 14, "bold"), command=self.sort_results,
-                                      fg_color="transparent", text_color=C_TEXT_MAIN, border_width=1, border_color=C_BORDER, hover_color=C_BG, corner_radius=20, width=130, height=36)
-        self.btn_sort.pack(side="right", padx=20)
+        # Sort Button
+        self.btn_sort = ctk.CTkButton(self.control_card, text="🔽 Sort", font=("Segoe UI", 13, "bold"), command=self.sort_results,
+                                      fg_color="transparent", text_color=C_TEXT_MAIN, border_width=1, border_color=C_BORDER, hover_color=C_BG, corner_radius=24, width=80, height=36)
+        self.btn_sort.pack(side="right", padx=5)
 
-        self.btn_export = ctk.CTkButton(self.control_card, text="💾 Export CSV", font=("Helvetica", 14, "bold"), command=self.export_csv,
-                                        fg_color="transparent", text_color=C_TEXT_MAIN, border_width=1, border_color=C_BORDER, hover_color=C_BG, corner_radius=20, width=130, height=36)
-        self.btn_export.pack(side="right", padx=5)
+        self.lbl_progress_text = ctk.CTkLabel(self.control_card, text="", text_color=C_PRIMARY, font=("Segoe UI", 13, "bold"))
+        self.lbl_progress_text.pack(side="right", padx=10)
 
         # Table Area
         self.table_scroll = ScrollableTable(self)
@@ -184,7 +175,6 @@ class ModernDNSApp(ctk.CTk):
         self.dns_list = ConfigManager.parse_dns_list(self.config_data.get("dns_list", []), self.system_dns)
         self.domains = self.config_data.get("domain_list", [])
         
-        # Update Networks UI
         self.networks = self.config_data.get("network_list", [])
         if not self.networks:
             self.networks = ["Unknown"]
@@ -204,14 +194,12 @@ class ModernDNSApp(ctk.CTk):
         filtered_df = df[mask].copy()
         filtered_df['DNS_Name'] = filtered_df['DNS_Name'].fillna("")
         
-        # Group and calculate mean for errors and pings
         grouped = filtered_df.groupby(['DNS_IP', 'DNS_Name']).agg(
             Test_Count=('Errors', 'count'),
             Avg_Errors=('Errors', 'mean'),
             Avg_Ping=('Avg_Ping_ms', lambda x: x[x > 0].mean() if (x > 0).any() else -1)
         ).reset_index()
         
-        # Initial sort by lowest average errors, then lowest average ping
         grouped = grouped.sort_values(by=['Avg_Errors', 'Avg_Ping'], ascending=[True, True])
         
         self.history_results = grouped.to_dict('records')
@@ -260,8 +248,8 @@ class ModernDNSApp(ctk.CTk):
                 elif col_idx == 3: width = 120
                 else: width = 120
                 
-                lbl = ctk.CTkLabel(self.table_scroll.inner_frame, text=text, font=("Helvetica", 14, "bold"), 
-                                   fg_color=C_BG, text_color=C_TEXT_MAIN, corner_radius=6, width=width, height=32)
+                lbl = ctk.CTkLabel(self.table_scroll.inner_frame, text=text, font=("Segoe UI", 14, "bold"), 
+                                   fg_color=C_CARD, text_color=C_TEXT_MAIN, corner_radius=6, width=width, height=32)
                 lbl.grid(row=0, column=actual_col, padx=4, pady=(15, 10), sticky="ew")
 
                 if col_idx < len(headers) - 1:
@@ -270,49 +258,42 @@ class ModernDNSApp(ctk.CTk):
             for row_index, row_data in enumerate(self.history_results):
                 grid_row = (row_index * 2) + 1
                 
-                # Row Number
-                ctk.CTkLabel(self.table_scroll.inner_frame, text=str(row_index + 1), font=("Helvetica", 13, "bold"), text_color=C_TEXT_MUTED).grid(row=grid_row, column=0, padx=4, pady=8)
+                ctk.CTkLabel(self.table_scroll.inner_frame, text=str(row_index + 1), font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED).grid(row=grid_row, column=0, padx=4, pady=8)
 
-                # DNS Server Column
                 srv_frame = ctk.CTkFrame(self.table_scroll.inner_frame, fg_color="transparent", cursor="hand2")
                 srv_frame.grid(row=grid_row, column=2, padx=10, pady=8, sticky="w")
                 srv_frame.bind("<Double-Button-1>", lambda e, ip=row_data['DNS_IP']: self.copy_to_clipboard(ip))
                 
-                lbl_ip = ctk.CTkLabel(srv_frame, text=row_data['DNS_IP'], font=("Helvetica", 14, "bold"), text_color=C_PRIMARY)
+                lbl_ip = ctk.CTkLabel(srv_frame, text=row_data['DNS_IP'], font=("Segoe UI", 14, "bold"), text_color=C_PRIMARY)
                 lbl_ip.pack(side="left")
                 lbl_ip.bind("<Double-Button-1>", lambda e, ip=row_data['DNS_IP']: self.copy_to_clipboard(ip))
 
                 if row_data['DNS_Name']:
-                    ctk.CTkLabel(srv_frame, text=f" {row_data['DNS_Name']}", font=("Helvetica", 12), text_color=C_TEXT_MUTED).pack(side="left", padx=(4,0))
+                    ctk.CTkLabel(srv_frame, text=f" {row_data['DNS_Name']}", font=("Segoe UI", 12), text_color=C_TEXT_MUTED).pack(side="left", padx=(4,0))
 
-                # Avg Errors
                 avg_err = round(row_data['Avg_Errors'], 2)
                 err_color = C_SUCCESS if avg_err < 1 else (C_WARNING if avg_err <= 3 else C_ERROR)
-                ctk.CTkLabel(self.table_scroll.inner_frame, text=str(avg_err), font=("Helvetica", 15, "bold"), text_color=err_color).grid(row=grid_row, column=4)
+                ctk.CTkLabel(self.table_scroll.inner_frame, text=str(avg_err), font=("Segoe UI", 15, "bold"), text_color=err_color).grid(row=grid_row, column=4)
 
-                # Avg Ping
                 ping_val = row_data['Avg_Ping']
                 ping_str = f"{round(ping_val)} ms" if ping_val != -1 else "Failed"
-                ctk.CTkLabel(self.table_scroll.inner_frame, text=ping_str, font=("Helvetica", 14, "bold"), text_color=C_TEXT_MAIN).grid(row=grid_row, column=6)
+                ctk.CTkLabel(self.table_scroll.inner_frame, text=ping_str, font=("Segoe UI", 14, "bold"), text_color=C_TEXT_MAIN).grid(row=grid_row, column=6)
 
-                # Tests Count
-                ctk.CTkLabel(self.table_scroll.inner_frame, text=str(int(row_data['Test_Count'])), font=("Helvetica", 14, "bold"), text_color=C_TEXT_MUTED).grid(row=grid_row, column=8)
+                ctk.CTkLabel(self.table_scroll.inner_frame, text=str(int(row_data['Test_Count'])), font=("Segoe UI", 14, "bold"), text_color=C_TEXT_MUTED).grid(row=grid_row, column=8)
 
                 ctk.CTkFrame(self.table_scroll.inner_frame, height=1, fg_color=C_BG).grid(row=grid_row + 1, column=0, columnspan=total_cols, sticky="ew", padx=10)
 
             return
 
-        # ==========================================
         # Build UI for LIVE Mode
-        # ==========================================
         if not self.active_profiles:
-            ctk.CTkLabel(self.table_scroll.inner_frame, text="No Configuration Loaded. Click '📂 Profiles' to select files.", 
-                         font=("Helvetica", 16, "bold"), text_color=C_WARNING).grid(row=0, column=0, padx=30, pady=30)
+            ctk.CTkLabel(self.table_scroll.inner_frame, text="No Configuration Loaded. Use the Profile dropdown to select files.", 
+                         font=("Segoe UI", 16, "bold"), text_color=C_WARNING).grid(row=0, column=0, padx=30, pady=30)
             return
 
         if not self.dns_list or not self.domains:
             ctk.CTkLabel(self.table_scroll.inner_frame, text="Selected profile(s) are empty. Please add data via Settings.", 
-                         font=("Helvetica", 16), text_color=C_TEXT_MUTED).grid(row=0, column=0, padx=30, pady=30)
+                         font=("Segoe UI", 16), text_color=C_TEXT_MUTED).grid(row=0, column=0, padx=30, pady=30)
             return
 
         display_domains = [ConfigManager.format_domain(d) for d in self.domains]
@@ -328,8 +309,8 @@ class ModernDNSApp(ctk.CTk):
             elif col_idx == 3: width = 90
             else: width = 110
             
-            lbl = ctk.CTkLabel(self.table_scroll.inner_frame, text=text, font=("Helvetica", 13, "bold"), 
-                               fg_color=C_BG, text_color=C_TEXT_MAIN, corner_radius=6, width=width, height=32)
+            lbl = ctk.CTkLabel(self.table_scroll.inner_frame, text=text, font=("Segoe UI", 13, "bold"), 
+                               fg_color=C_CARD, text_color=C_TEXT_MAIN, corner_radius=6, width=width, height=32)
             lbl.grid(row=0, column=actual_col, padx=4, pady=(15, 10), sticky="ew")
 
             if col_idx < len(headers) - 1:
@@ -340,27 +321,24 @@ class ModernDNSApp(ctk.CTk):
             row_id = info["row_id"]
             self.ui_cells[row_id] = {}
 
-            # Row Number
-            lbl_row_num = ctk.CTkLabel(self.table_scroll.inner_frame, text=str(row_index + 1), font=("Helvetica", 13, "bold"), text_color=C_TEXT_MUTED)
+            lbl_row_num = ctk.CTkLabel(self.table_scroll.inner_frame, text=str(row_index + 1), font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED)
             lbl_row_num.grid(row=grid_row, column=0, padx=4, pady=8)
 
-            # DNS Server Column
             srv_frame = ctk.CTkFrame(self.table_scroll.inner_frame, fg_color="transparent", cursor="hand2")
             srv_frame.grid(row=grid_row, column=2, padx=10, pady=8, sticky="w")
             srv_frame.bind("<Double-Button-1>", lambda e, ip=info["ip"]: self.copy_to_clipboard(ip))
             
-            lbl_ip = ctk.CTkLabel(srv_frame, text=info["ip"], font=("Helvetica", 14, "bold"), text_color=C_PRIMARY)
+            lbl_ip = ctk.CTkLabel(srv_frame, text=info["ip"], font=("Segoe UI", 14, "bold"), text_color=C_PRIMARY)
             lbl_ip.pack(side="left")
             lbl_ip.bind("<Double-Button-1>", lambda e, ip=info["ip"]: self.copy_to_clipboard(ip))
 
             if info["is_system"]:
-                ctk.CTkLabel(srv_frame, text=" [System]", font=("Helvetica", 11, "bold"), text_color=C_WARNING).pack(side="left", padx=(4,0))
+                ctk.CTkLabel(srv_frame, text=" [System]", font=("Segoe UI", 11, "bold"), text_color=C_WARNING).pack(side="left", padx=(4,0))
             if info["name"]:
-                ctk.CTkLabel(srv_frame, text=f" {info['name']}", font=("Helvetica", 12), text_color=C_TEXT_MUTED).pack(side="left", padx=(4,0))
+                ctk.CTkLabel(srv_frame, text=f" {info['name']}", font=("Segoe UI", 12), text_color=C_TEXT_MUTED).pack(side="left", padx=(4,0))
 
             avg_text, err_text = self.calculate_metrics(row_id)
             
-            # Errors Column
             grade_color = C_TEXT_MUTED
             if err_text != "-":
                 err_val = int(err_text)
@@ -368,26 +346,23 @@ class ModernDNSApp(ctk.CTk):
                 elif err_val <= 2: grade_color = C_WARNING
                 else: grade_color = C_ERROR
 
-            lbl_grade = ctk.CTkLabel(self.table_scroll.inner_frame, text=err_text, font=("Helvetica", 15, "bold"), text_color=grade_color)
+            lbl_grade = ctk.CTkLabel(self.table_scroll.inner_frame, text=err_text, font=("Segoe UI", 15, "bold"), text_color=grade_color)
             lbl_grade.grid(row=grid_row, column=4)
             self.ui_cells[row_id]["_grade"] = lbl_grade
 
-            # Avg Ping Column
-            lbl_avg = ctk.CTkLabel(self.table_scroll.inner_frame, text=avg_text, font=("Helvetica", 14, "bold"), text_color=C_TEXT_MAIN)
+            lbl_avg = ctk.CTkLabel(self.table_scroll.inner_frame, text=avg_text, font=("Segoe UI", 14, "bold"), text_color=C_TEXT_MAIN)
             lbl_avg.grid(row=grid_row, column=6)
             self.ui_cells[row_id]["_avg"] = lbl_avg
 
-            # Domains Columns
             for col_idx, domain in enumerate(self.domains, start=4):
                 actual_col = col_idx * 2
-                lbl_cell = ctk.CTkLabel(self.table_scroll.inner_frame, text="-", text_color=C_BORDER, font=("Helvetica", 14, "bold"), width=110)
+                lbl_cell = ctk.CTkLabel(self.table_scroll.inner_frame, text="-", text_color=C_BORDER, font=("Segoe UI", 14, "bold"), width=110)
                 lbl_cell.grid(row=grid_row, column=actual_col, padx=4, pady=8)
                 self.ui_cells[row_id][domain] = lbl_cell
 
             ctk.CTkFrame(self.table_scroll.inner_frame, height=1, fg_color=C_BG).grid(row=grid_row + 1, column=0, columnspan=total_cols, sticky="ew", padx=10)
 
     def toggle_scan(self):
-        # Switching back to Live Mode if we were in History Mode
         if self.display_mode == "history":
             self.display_mode = "live"
             self.build_grid()
@@ -412,7 +387,7 @@ class ModernDNSApp(ctk.CTk):
         self.lbl_progress_text.configure(text=f"0 / {self.total_tasks}")
         self.combo_network.configure(state="disabled")
         
-        self.btn_start.configure(text="🛑 Stop Scan", fg_color="#601410", text_color=C_ERROR, hover_color="#400D0B")
+        self.btn_start.configure(text="🛑 Stop Scan", fg_color="#8C1D18", text_color=C_TEXT_MAIN, hover_color="#601410")
         self.lbl_status.configure(text="Benchmarking...", text_color=C_PRIMARY)
         
         for row_id in self.ui_cells:
@@ -449,7 +424,7 @@ class ModernDNSApp(ctk.CTk):
                 
                 if row_id == "DONE":
                     self.is_scanning = False
-                    self.btn_start.configure(state="normal", text="🚀 Start Benchmark", fg_color=C_PRIMARY_BG, text_color=C_PRIMARY, hover_color="#063580")
+                    self.btn_start.configure(state="normal", text="🚀 Start Benchmark", fg_color=C_PRIMARY_BG, text_color=C_TEXT_MAIN, hover_color="#0842A0")
                     self.combo_network.configure(state="normal")
                     self.progress_bar.set(1.0)
                     self.lbl_progress_text.configure(text=f"{self.total_tasks} / {self.total_tasks}")
@@ -457,9 +432,9 @@ class ModernDNSApp(ctk.CTk):
                     if self.stop_event.is_set():
                         self.lbl_status.configure(text="Scan Aborted", text_color=C_ERROR)
                     else:
-                        self.lbl_status.configure(text="Scan Complete. Saving history...", text_color=C_SUCCESS)
+                        self.lbl_status.configure(text="Saving history...", text_color=C_SUCCESS)
                         self._save_to_history()
-                        self.lbl_status.configure(text="Scan Complete & Saved", text_color=C_SUCCESS)
+                        self.lbl_status.configure(text="Scan Complete", text_color=C_SUCCESS)
                     
                     for r_id in self.ui_cells:
                         avg, err_text = self.calculate_metrics(r_id)
@@ -480,7 +455,7 @@ class ModernDNSApp(ctk.CTk):
                     if row_id in self.ui_cells and domain in self.ui_cells[row_id]:
                         lbl = self.ui_cells[row_id][domain]
                         if success: lbl.configure(text=text, text_color=C_SUCCESS)
-                        else: lbl.configure(text=text, text_color=C_ERROR, font=("Helvetica", 12))
+                        else: lbl.configure(text=text, text_color=C_ERROR, font=("Segoe UI", 12))
 
             except queue.Empty: break
         self.after(50, self.process_queue)
@@ -517,12 +492,10 @@ class ModernDNSApp(ctk.CTk):
                 messagebox.showinfo("Info", "Load history data to sort.")
                 return
             
-            # Sort History Mode Data
             self.history_results.sort(key=lambda x: (x['Avg_Errors'], x['Avg_Ping']))
             self.build_grid()
             
         else:
-            # Sort Live Mode Data
             if not self.results_data or self.is_scanning:
                 messagebox.showinfo("Info", "Complete a scan before sorting.")
                 return
@@ -554,7 +527,7 @@ class ModernDNSApp(ctk.CTk):
                         if dom in self.ui_cells[row_id]:
                             lbl = self.ui_cells[row_id][dom]
                             if res["success"]: lbl.configure(text=res["text"], text_color=C_SUCCESS)
-                            elif res.get("text"): lbl.configure(text=res["text"], text_color=C_ERROR, font=("Helvetica", 12))
+                            elif res.get("text"): lbl.configure(text=res["text"], text_color=C_ERROR, font=("Segoe UI", 12))
 
     def get_best_successful_dns(self):
         if not self.results_data: return []
@@ -604,113 +577,112 @@ class ModernDNSApp(ctk.CTk):
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save: {str(e)}")
 
-
     # ==========================================
-    # History Management Window
+    # Unified Preferences Window
     # ==========================================
-    def open_history(self):
-        if not os.path.exists("benchmark_history.csv"):
-            messagebox.showinfo("History", "No history found. Complete a benchmark scan first.")
-            return
-
+    def open_preferences(self):
         win = ctk.CTkToplevel(self, fg_color=C_BG)
-        win.title("Manage History")
-        win.geometry("500x650")
+        win.title("Preferences")
+        win.geometry("600x700")
         win.transient(self)
         win.grab_set()
 
-        try:
-            df = pd.read_csv("benchmark_history.csv")
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not read history file: {e}", parent=win)
-            win.destroy()
-            return
+        tabview = ctk.CTkTabview(win, fg_color=C_CARD, corner_radius=24, segmented_button_fg_color=C_BG, segmented_button_selected_color=C_PRIMARY_BG, segmented_button_selected_hover_color="#0842A0", text_color=C_TEXT_MAIN)
+        tabview.pack(fill="both", expand=True, padx=20, pady=20)
 
-        top_frame = ctk.CTkFrame(win, fg_color="transparent")
-        top_frame.pack(fill="x", padx=20, pady=(20, 10))
+        tabview.add("Settings")
+        tabview.add("Profiles")
+        tabview.add("History")
+        tabview.add("About")
+
+        self._build_settings_tab(tabview.tab("Settings"), win)
+        self._build_profiles_tab(tabview.tab("Profiles"), win)
+        self._build_history_tab(tabview.tab("History"), win)
+        self._build_about_tab(tabview.tab("About"), win)
+
+    def _build_settings_tab(self, parent, win):
+        profiles = ConfigManager.get_available_profiles()
+        default_sel = profiles[0] if profiles else "None"
         
-        ctk.CTkLabel(top_frame, text="📊 History Selector", font=("Helvetica", 22, "bold"), text_color=C_TEXT_MAIN).pack(side="left")
+        sel_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        sel_frame.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(sel_frame, text="Select Profile to Edit:", font=("Segoe UI", 13)).pack(side="left", padx=5)
+        combo_profile = ctk.CTkComboBox(sel_frame, values=profiles, state="readonly", width=180, corner_radius=8, border_color=C_BORDER)
+        combo_profile.set(default_sel)
+        combo_profile.pack(side="right")
 
-        scroll = ctk.CTkScrollableFrame(win, fg_color=C_CARD, corner_radius=12)
-        scroll.pack(fill="both", expand=True, padx=20, pady=10)
+        card = ctk.CTkFrame(parent, fg_color=C_BG, corner_radius=24)
+        card.pack(fill="x", padx=10, pady=15, ipady=10)
+        
+        def open_editor_wrapper(list_key, title_name):
+            sel_file = combo_profile.get()
+            if not sel_file or sel_file == "None": return
+            self._open_editor(sel_file, title_name, list_key)
 
-        # Dictionary to keep UI state relationships avoiding infinite recursion triggers
-        checkboxes = {}
-        updating_flag = {"state": False} 
+        ctk.CTkButton(card, text="📝 Edit DNS List", font=("Segoe UI", 14), command=lambda: open_editor_wrapper("dns_list", "DNS Servers"), 
+                      fg_color="transparent", border_width=1, border_color=C_BORDER, text_color=C_TEXT_MAIN, corner_radius=24, height=40).pack(pady=10, padx=20, fill="x")
+        ctk.CTkButton(card, text="🌐 Edit Domains", font=("Segoe UI", 14), command=lambda: open_editor_wrapper("domain_list", "Domain Targets"), 
+                      fg_color="transparent", border_width=1, border_color=C_BORDER, text_color=C_TEXT_MAIN, corner_radius=24, height=40).pack(pady=(0,10), padx=20, fill="x")
+        ctk.CTkButton(card, text="📡 Edit Networks (ISPs)", font=("Segoe UI", 14), command=lambda: open_editor_wrapper("network_list", "Network Targets"), 
+                      fg_color="transparent", border_width=1, border_color=C_BORDER, text_color=C_TEXT_MAIN, corner_radius=24, height=40).pack(pady=(0,10), padx=20, fill="x")
 
-        def on_master_toggle(net):
-            if updating_flag["state"]: return
-            updating_flag["state"] = True
-            
-            state = checkboxes[net]['master_var'].get()
-            for var in checkboxes[net]['slaves'].values():
-                var.set(state)
-                
-            updating_flag["state"] = False
+        param_card = ctk.CTkFrame(parent, fg_color=C_BG, corner_radius=24)
+        param_card.pack(fill="x", padx=10, pady=5)
 
-        def on_slave_toggle(net):
-            if updating_flag["state"]: return
-            updating_flag["state"] = True
-            
-            all_checked = all(var.get() for var in checkboxes[net]['slaves'].values())
-            checkboxes[net]['master_var'].set(all_checked)
-            
-            updating_flag["state"] = False
+        f1 = ctk.CTkFrame(param_card, fg_color="transparent")
+        f1.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(f1, text="Timeout (seconds):", font=("Segoe UI", 13)).pack(side="left")
+        e_timeout = ctk.CTkEntry(f1, width=80, justify="center", corner_radius=8, border_color=C_BORDER)
+        e_timeout.insert(0, str(self.current_timeout))
+        e_timeout.pack(side="right")
 
-        for net, group in df.groupby("Network"):
-            master_var = tk.BooleanVar(value=False)
-            slave_vars = {}
-            
-            cb_master = ctk.CTkCheckBox(scroll, text=f"Network: {net}", font=("Helvetica", 15, "bold"), 
-                                        variable=master_var, command=lambda n=net: on_master_toggle(n), text_color=C_PRIMARY)
-            cb_master.pack(anchor="w", padx=10, pady=(15, 5))
-            
-            timestamps = sorted(group["Timestamp"].unique(), reverse=True)
-            for ts in timestamps:
-                var = tk.BooleanVar(value=False)
-                
-                cb_slave = ctk.CTkCheckBox(scroll, text=f"{ts}", font=("Helvetica", 13), 
-                                           variable=var, command=lambda n=net: on_slave_toggle(n))
-                cb_slave.pack(anchor="w", padx=(40, 10), pady=4)
-                slave_vars[ts] = var
-                
-            checkboxes[net] = {'master_var': master_var, 'slaves': slave_vars}
+        f2 = ctk.CTkFrame(param_card, fg_color="transparent")
+        f2.pack(fill="x", padx=20, pady=(0, 10))
+        ctk.CTkLabel(f2, text="Thread Limit:", font=("Segoe UI", 13)).pack(side="left")
+        e_workers = ctk.CTkEntry(f2, width=80, justify="center", corner_radius=8, border_color=C_BORDER)
+        e_workers.insert(0, str(self.current_workers))
+        e_workers.pack(side="right")
 
-        def load_aggregated():
-            selected_criteria = []
-            for net, data in checkboxes.items():
-                for ts, var in data['slaves'].items():
-                    if var.get():
-                        selected_criteria.append((net, ts))
+        def apply():
+            try:
+                self.current_timeout = float(e_timeout.get())
+                self.current_workers = int(e_workers.get())
+                messagebox.showinfo("Success", "Settings applied successfully.", parent=win)
+            except: messagebox.showerror("Error", "Numeric values required.", parent=win)
 
-            if not selected_criteria:
-                messagebox.showwarning("Warning", "Please select at least one test to aggregate.", parent=win)
-                return
+        ctk.CTkButton(parent, text="Save App Settings", font=("Segoe UI", 14, "bold"), command=apply, 
+                      fg_color=C_PRIMARY_BG, text_color=C_TEXT_MAIN, hover_color="#0842A0", corner_radius=24, height=40).pack(pady=15)
 
-            self.load_history_data(selected_criteria, df)
-            win.destroy()
-
-        btn_load = ctk.CTkButton(win, text="📥 Load Aggregated Results", font=("Helvetica", 15, "bold"), 
-                                 command=load_aggregated, fg_color=C_SUCCESS, text_color=C_BG, hover_color="#6BBA80", height=42)
-        btn_load.pack(fill="x", padx=20, pady=(5, 20))
-
-
-    # ==========================================
-    # Profile Management Window
-    # ==========================================
-    def open_profiles_manager(self):
+    def _open_editor(self, filename, title, key):
         win = ctk.CTkToplevel(self, fg_color=C_BG)
-        win.title("Profile Manager")
-        win.geometry("450x550")
-        win.resizable(False, False)
+        win.title(f"Editing {filename}")
+        win.geometry("500x600")
         win.transient(self)
         win.grab_set()
 
-        top_frame = ctk.CTkFrame(win, fg_color="transparent")
-        top_frame.pack(fill="x", padx=20, pady=(20, 5))
-        
-        ctk.CTkLabel(top_frame, text="📁 Profiles", font=("Helvetica", 20, "bold"), text_color=C_TEXT_MAIN).pack(side="left")
+        file_data = ConfigManager.load_single_profile(filename)
 
+        ctk.CTkLabel(win, text=f"Edit {title}", font=("Segoe UI", 18, "bold"), text_color=C_TEXT_MAIN).pack(pady=(20, 5))
+        ctk.CTkLabel(win, text=f"File: {filename}", font=("Segoe UI", 12), text_color=C_TEXT_MUTED).pack(pady=(0, 10))
+        
+        tb = ctk.CTkTextbox(win, font=("Consolas", 14), fg_color=C_CARD, border_width=1, border_color=C_BORDER, corner_radius=16)
+        tb.pack(padx=20, pady=10, fill="both", expand=True)
+        tb.insert("1.0", "\n".join(file_data.get(key, [])))
+
+        def save():
+            lines = [line.strip() for line in tb.get("1.0", "end-1c").split("\n") if line.strip()]
+            file_data[key] = lines
+            ConfigManager.save_single_profile(filename, file_data)
+            
+            if filename in self.active_profiles:
+                self.load_selected_profiles(self.active_profiles)
+                
+            win.destroy()
+
+        ctk.CTkButton(win, text="Save File", font=("Segoe UI", 14, "bold"), command=save, fg_color=C_SUCCESS, text_color=C_BG, hover_color="#6BBA80", corner_radius=24, height=40).pack(pady=20)
+
+
+    def _build_profiles_tab(self, parent, win):
         def create_empty():
             name = simpledialog.askstring("New Empty Profile", "Enter profile name (e.g., gaming, work):", parent=win)
             if name:
@@ -720,30 +692,33 @@ class ModernDNSApp(ctk.CTk):
                     if filename not in ConfigManager.get_available_profiles():
                         ConfigManager.save_single_profile(filename, {"dns_list": [], "domain_list": [], "network_list": ["Default_Network"]})
                         win.destroy()
-                        self.open_profiles_manager()
+                        self.open_preferences()
                     else:
                         messagebox.showwarning("Exists", "Profile already exists.", parent=win)
 
-        btn_new = ctk.CTkButton(top_frame, text="+ New", font=("Helvetica", 12, "bold"), width=60, height=28, 
-                                command=create_empty, fg_color=C_CARD, text_color=C_TEXT_MAIN, 
+        btn_new = ctk.CTkButton(parent, text="+ Create New Profile", font=("Segoe UI", 14, "bold"), height=40, corner_radius=24,
+                                command=create_empty, fg_color=C_BG, text_color=C_TEXT_MAIN, 
                                 hover_color=C_BORDER, border_width=1, border_color=C_BORDER)
-        btn_new.pack(side="right")
+        btn_new.pack(fill="x", padx=10, pady=(10, 5))
 
-        scroll = ctk.CTkScrollableFrame(win, fg_color=C_CARD, corner_radius=12)
-        scroll.pack(fill="both", expand=True, padx=20, pady=5)
+        scroll = ctk.CTkScrollableFrame(parent, fg_color=C_BG, corner_radius=16)
+        scroll.pack(fill="both", expand=True, padx=10, pady=5)
 
         profiles = ConfigManager.get_available_profiles()
         checkbox_vars = {}
 
         for prof in profiles:
             var = tk.BooleanVar(value=(prof in self.active_profiles))
-            cb = ctk.CTkCheckBox(scroll, text=prof, variable=var, font=("Helvetica", 14), text_color=C_TEXT_MAIN)
+            cb = ctk.CTkCheckBox(scroll, text=prof, variable=var, font=("Segoe UI", 14), text_color=C_TEXT_MAIN, corner_radius=6, border_color=C_BORDER, hover_color=C_PRIMARY_BG)
             cb.pack(anchor="w", pady=8, padx=10)
             checkbox_vars[prof] = var
 
         def apply_load():
             selected = [p for p, var in checkbox_vars.items() if var.get()]
             self.load_selected_profiles(selected)
+            if selected:
+                self.combo_profile.configure(values=ConfigManager.get_available_profiles())
+                self.combo_profile.set(selected[0])
             win.destroy()
 
         def save_best_profile():
@@ -763,139 +738,108 @@ class ModernDNSApp(ctk.CTk):
             data_to_save = {"dns_list": best_dns_lines, "domain_list": self.domains, "network_list": self.networks}
             ConfigManager.save_single_profile(new_filename, data_to_save)
             messagebox.showinfo("Success", f"Saved {len(best_dns_lines)} working DNS servers to {new_filename}", parent=win)
+            self.combo_profile.configure(values=ConfigManager.get_available_profiles())
             win.destroy()
-            self.open_profiles_manager()
+            self.open_preferences()
 
-        btn_frame_main = ctk.CTkFrame(win, fg_color="transparent")
-        btn_frame_main.pack(fill="x", padx=20, pady=(10, 15))
+        btn_frame_main = ctk.CTkFrame(parent, fg_color="transparent")
+        btn_frame_main.pack(fill="x", padx=10, pady=(10, 15))
         
-        btn_load = ctk.CTkButton(btn_frame_main, text="📥 Load Selected", font=("Helvetica", 14, "bold"), 
+        btn_load = ctk.CTkButton(btn_frame_main, text="📥 Load Selected", font=("Segoe UI", 14, "bold"), height=40, corner_radius=24,
                       command=apply_load, fg_color=C_SUCCESS, text_color=C_BG, hover_color="#6BBA80")
         btn_load.pack(side="left", expand=True, padx=(0, 5), fill="x")
 
-        btn_best = ctk.CTkButton(btn_frame_main, text="🌟 Save Bests", font=("Helvetica", 14, "bold"), 
-                                 command=save_best_profile, fg_color=C_PRIMARY_BG, text_color=C_PRIMARY)
+        btn_best = ctk.CTkButton(btn_frame_main, text="🌟 Save Bests", font=("Segoe UI", 14, "bold"), height=40, corner_radius=24,
+                                 command=save_best_profile, fg_color=C_PRIMARY_BG, text_color=C_TEXT_MAIN, hover_color="#0842A0")
         btn_best.pack(side="right", expand=True, padx=(5, 0), fill="x")
 
-        def check_selections(*args):
-            if any(var.get() for var in checkbox_vars.values()):
-                btn_load.configure(state="normal", fg_color=C_SUCCESS, text_color=C_BG)
-            else:
-                btn_load.configure(state="disabled", fg_color=C_BORDER, text_color=C_TEXT_MUTED)
+    def _build_history_tab(self, parent, win):
+        if not os.path.exists("benchmark_history.csv"):
+            ctk.CTkLabel(parent, text="No history found. Complete a benchmark scan first.", text_color=C_WARNING).pack(pady=30)
+            return
 
-        for var in checkbox_vars.values():
-            var.trace_add("write", check_selections)
-        check_selections()
+        try:
+            df = pd.read_csv("benchmark_history.csv")
+        except Exception as e:
+            ctk.CTkLabel(parent, text=f"Error reading history: {e}", text_color=C_ERROR).pack(pady=30)
+            return
 
-        if self.display_mode == "history" or not self.is_sorted or self.is_scanning:
-            btn_best.configure(state="disabled", fg_color=C_BORDER, text_color=C_TEXT_MUTED)
+        scroll = ctk.CTkScrollableFrame(parent, fg_color=C_BG, corner_radius=16)
+        scroll.pack(fill="both", expand=True, padx=10, pady=10)
 
-    # ==========================================
-    # Secondary Windows (Settings & About)
-    # ==========================================
-    def open_settings(self):
-        win = ctk.CTkToplevel(self, fg_color=C_BG)
-        win.title("Settings")
-        win.geometry("450x520")
-        win.resizable(False, False)
-        win.transient(self)
-        win.grab_set()
+        checkboxes = {}
+        updating_flag = {"state": False} 
 
-        ctk.CTkLabel(win, text="⚙️ Configuration", font=("Helvetica", 20, "bold"), text_color=C_TEXT_MAIN).pack(pady=(25, 10))
+        def on_master_toggle(net):
+            if updating_flag["state"]: return
+            updating_flag["state"] = True
+            state = checkboxes[net]['master_var'].get()
+            for var in checkboxes[net]['slaves'].values():
+                var.set(state)
+            updating_flag["state"] = False
 
-        profiles = ConfigManager.get_available_profiles()
-        default_sel = profiles[0] if profiles else "None"
-        
-        sel_frame = ctk.CTkFrame(win, fg_color="transparent")
-        sel_frame.pack(fill="x", padx=30, pady=5)
-        ctk.CTkLabel(sel_frame, text="Select Profile to Edit:", font=("Helvetica", 13)).pack(side="left", padx=5)
-        combo_profile = ctk.CTkComboBox(sel_frame, values=profiles, state="readonly", width=180)
-        combo_profile.set(default_sel)
-        combo_profile.pack(side="right")
+        def on_slave_toggle(net):
+            if updating_flag["state"]: return
+            updating_flag["state"] = True
+            all_checked = all(var.get() for var in checkboxes[net]['slaves'].values())
+            checkboxes[net]['master_var'].set(all_checked)
+            updating_flag["state"] = False
 
-        card = ctk.CTkFrame(win, fg_color=C_CARD, corner_radius=12)
-        card.pack(fill="x", padx=30, pady=15, ipady=10)
-        
-        def open_editor_wrapper(list_key, title_name):
-            sel_file = combo_profile.get()
-            if not sel_file or sel_file == "None": return
-            self._open_editor(sel_file, title_name, list_key)
-
-        ctk.CTkButton(card, text="📝 Edit DNS List", font=("Helvetica", 14), command=lambda: open_editor_wrapper("dns_list", "DNS Servers"), 
-                      fg_color="transparent", border_width=1, border_color=C_BORDER, text_color=C_TEXT_MAIN).pack(pady=10, padx=20, fill="x")
-        ctk.CTkButton(card, text="🌐 Edit Domains", font=("Helvetica", 14), command=lambda: open_editor_wrapper("domain_list", "Domain Targets"), 
-                      fg_color="transparent", border_width=1, border_color=C_BORDER, text_color=C_TEXT_MAIN).pack(pady=(0,10), padx=20, fill="x")
-        ctk.CTkButton(card, text="📡 Edit Networks (ISPs)", font=("Helvetica", 14), command=lambda: open_editor_wrapper("network_list", "Network Targets"), 
-                      fg_color="transparent", border_width=1, border_color=C_BORDER, text_color=C_TEXT_MAIN).pack(pady=(0,10), padx=20, fill="x")
-
-        param_card = ctk.CTkFrame(win, fg_color=C_CARD, corner_radius=12)
-        param_card.pack(fill="x", padx=30, pady=5)
-
-        f1 = ctk.CTkFrame(param_card, fg_color="transparent")
-        f1.pack(fill="x", padx=20, pady=10)
-        ctk.CTkLabel(f1, text="Timeout (seconds):", font=("Helvetica", 13)).pack(side="left")
-        e_timeout = ctk.CTkEntry(f1, width=80, justify="center")
-        e_timeout.insert(0, str(self.current_timeout))
-        e_timeout.pack(side="right")
-
-        f2 = ctk.CTkFrame(param_card, fg_color="transparent")
-        f2.pack(fill="x", padx=20, pady=(0, 10))
-        ctk.CTkLabel(f2, text="Thread Limit:", font=("Helvetica", 13)).pack(side="left")
-        e_workers = ctk.CTkEntry(f2, width=80, justify="center")
-        e_workers.insert(0, str(self.current_workers))
-        e_workers.pack(side="right")
-
-        def apply():
-            try:
-                self.current_timeout = float(e_timeout.get())
-                self.current_workers = int(e_workers.get())
-                win.destroy()
-            except: messagebox.showerror("Error", "Numeric values required.", parent=win)
-
-        ctk.CTkButton(win, text="Save App Settings", font=("Helvetica", 14, "bold"), command=apply, 
-                      fg_color=C_PRIMARY_BG, text_color=C_PRIMARY, hover_color="#063580").pack(pady=15)
-
-    def _open_editor(self, filename, title, key):
-        win = ctk.CTkToplevel(self, fg_color=C_BG)
-        win.title(f"Editing {filename}")
-        win.geometry("500x600")
-        win.transient(self)
-        win.grab_set()
-
-        file_data = ConfigManager.load_single_profile(filename)
-
-        ctk.CTkLabel(win, text=f"Edit {title}", font=("Helvetica", 18, "bold"), text_color=C_TEXT_MAIN).pack(pady=(20, 5))
-        ctk.CTkLabel(win, text=f"File: {filename}", font=("Helvetica", 12), text_color=C_TEXT_MUTED).pack(pady=(0, 10))
-        
-        tb = ctk.CTkTextbox(win, font=("Consolas", 14), fg_color=C_CARD, border_width=1, border_color=C_BORDER)
-        tb.pack(padx=20, pady=10, fill="both", expand=True)
-        tb.insert("1.0", "\n".join(file_data.get(key, [])))
-
-        def save():
-            lines = [line.strip() for line in tb.get("1.0", "end-1c").split("\n") if line.strip()]
-            file_data[key] = lines
-            ConfigManager.save_single_profile(filename, file_data)
+        for net, group in df.groupby("Network"):
+            master_var = tk.BooleanVar(value=False)
+            slave_vars = {}
             
-            if filename in self.active_profiles:
-                self.load_selected_profiles(self.active_profiles)
+            cb_master = ctk.CTkCheckBox(scroll, text=f"Network: {net}", font=("Segoe UI", 15, "bold"), 
+                                        variable=master_var, command=lambda n=net: on_master_toggle(n), text_color=C_PRIMARY, corner_radius=6, border_color=C_BORDER, hover_color=C_PRIMARY_BG)
+            cb_master.pack(anchor="w", padx=10, pady=(15, 5))
+            
+            timestamps = sorted(group["Timestamp"].unique(), reverse=True)
+            for ts in timestamps:
+                var = tk.BooleanVar(value=False)
+                cb_slave = ctk.CTkCheckBox(scroll, text=f"{ts}", font=("Segoe UI", 13), 
+                                           variable=var, command=lambda n=net: on_slave_toggle(n), corner_radius=6, border_color=C_BORDER, hover_color=C_PRIMARY_BG)
+                cb_slave.pack(anchor="w", padx=(40, 10), pady=4)
+                slave_vars[ts] = var
                 
+            checkboxes[net] = {'master_var': master_var, 'slaves': slave_vars}
+
+        def load_aggregated():
+            selected_criteria = []
+            for net, data in checkboxes.items():
+                for ts, var in data['slaves'].items():
+                    if var.get():
+                        selected_criteria.append((net, ts))
+            if not selected_criteria:
+                messagebox.showwarning("Warning", "Please select at least one test to aggregate.", parent=win)
+                return
+            self.load_history_data(selected_criteria, df)
             win.destroy()
 
-        ctk.CTkButton(win, text="Save File", font=("Helvetica", 14, "bold"), command=save, fg_color=C_SUCCESS, text_color=C_BG, hover_color="#6BBA80").pack(pady=20)
+        btn_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=10, pady=(5, 10))
 
-    def open_about(self):
-        win = ctk.CTkToplevel(self, fg_color=C_BG)
-        win.title("About")
-        win.geometry("450x300")
-        win.resizable(False, False)
-        win.transient(self) 
-        win.grab_set() 
+        btn_load = ctk.CTkButton(btn_frame, text="📥 Load History Data", font=("Segoe UI", 14, "bold"), height=40, corner_radius=24,
+                                 command=load_aggregated, fg_color=C_SUCCESS, text_color=C_BG, hover_color="#6BBA80")
+        btn_load.pack(side="left", expand=True, padx=(0, 5), fill="x")
+
+        btn_export = ctk.CTkButton(btn_frame, text="💾 Export CSV", font=("Segoe UI", 14, "bold"), height=40, corner_radius=24,
+                                   command=self.export_csv, fg_color=C_BG, text_color=C_TEXT_MAIN, border_width=1, border_color=C_BORDER, hover_color=C_BORDER)
+        btn_export.pack(side="right", expand=True, padx=(5, 0), fill="x")
+
+    def _build_about_tab(self, parent, win):
+        ctk.CTkLabel(parent, text="🌐", font=("Segoe UI Emoji", 48)).pack(pady=(40, 0))
+        ctk.CTkLabel(parent, text=f"DNS Benchmark Pro", font=("Segoe UI", 24, "bold"), text_color=C_TEXT_MAIN).pack(pady=(10, 0))
+        ctk.CTkLabel(parent, text=f"Version {APP_VERSION}", font=("Segoe UI", 14), text_color=C_PRIMARY).pack(pady=(5, 20))
         
-        ctk.CTkLabel(win, text=f"DNS Benchmark Pro", font=("Helvetica", 22, "bold"), text_color=C_TEXT_MAIN).pack(pady=(30, 0))
-        ctk.CTkLabel(win, text=f"Version {APP_VERSION}", font=("Helvetica", 14), text_color=C_PRIMARY).pack()
+        info_frame = ctk.CTkFrame(parent, fg_color=C_BG, corner_radius=24)
+        info_frame.pack(fill="x", padx=40, pady=10, ipady=10)
         
-        desc = "A highly optimized, multi-threaded networking utility engineered for accurate DNS latency and testing.\n\nFeatures profile workspaces, ISP Analytics history, and smart metrics."
-        ctk.CTkLabel(win, text=desc, font=("Helvetica", 13), text_color=C_TEXT_MUTED, wraplength=380, justify="center").pack(padx=20, pady=25)
-        
-        ctk.CTkLabel(win, text="Developer: BlueFalcon", font=("Helvetica", 13, "bold"), text_color=C_TEXT_MAIN).pack()
-        ctk.CTkLabel(win, text="Bluefalcon2270@gmail.com", font=("Helvetica", 12), text_color=C_TEXT_MUTED).pack()
+        ctk.CTkLabel(info_frame, text="Developer:", font=("Segoe UI", 13), text_color=C_TEXT_MUTED).pack(pady=(10, 0))
+        ctk.CTkLabel(info_frame, text="BlueFalcon", font=("Segoe UI", 16, "bold"), text_color=C_PRO).pack()
+
+        def open_github():
+            webbrowser.open_new_tab("https://github.com/bluefalcon2270/bluefalcon-dns-benchmark")
+
+        btn_git = ctk.CTkButton(parent, text="⭐ GitHub Repository", font=("Segoe UI", 14, "bold"), command=open_github,
+                                fg_color="#282A2C", hover_color="#383A3C", text_color=C_TEXT_MAIN, corner_radius=24, height=44)
+        btn_git.pack(pady=30)
