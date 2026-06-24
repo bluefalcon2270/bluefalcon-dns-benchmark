@@ -1,4 +1,4 @@
-# Version 44.0 | File: core.py | Network and Configuration Management
+# Version 45.0 | File: core.py | Network and Configuration Management
 import os
 import time
 import socket
@@ -24,8 +24,7 @@ class NetworkUtils:
         try:
             resolver = dns.resolver.Resolver()
             return resolver.nameservers
-        except Exception:
-            return []
+        except Exception: return []
 
     @staticmethod
     def tcp_test(ip, port, timeout):
@@ -37,11 +36,6 @@ class NetworkUtils:
             dt = (time.time() - t0) * 1000
             sock.close()
             return True, round(dt)
-        except socket.timeout: return False, "TCP Timeout"
-        except ConnectionRefusedError: return False, "Refused"
-        except OSError as e:
-            if e.errno == 10051: return False, "Unreachable"
-            return False, "TCP Err"
         except Exception: return False, "TCP Err"
 
     @staticmethod
@@ -50,22 +44,14 @@ class NetworkUtils:
         resolver.nameservers = [dns_ip]
         resolver.timeout = timeout
         resolver.lifetime = timeout
-        
         try:
             ans = resolver.resolve(domain, "A")
             ips = [x.to_text() for x in ans]
             if not ips: return False, "No IP", 0
-                
             ok, t_res = NetworkUtils.tcp_test(ips[0], 443, timeout)
             if ok: return True, f"{t_res} ms", t_res
             else: return False, str(t_res), 0
-                
-        except dns.resolver.NXDOMAIN: return False, "NXDOMAIN", 0
-        except dns.resolver.NoAnswer: return False, "No Answer", 0
-        except dns.resolver.NoNameservers: return False, "ServFail", 0
-        except dns.exception.Timeout: return False, "DNS Timeout", 0
         except Exception: return False, "?", 0
-
 
 class ConfigManager:
     @staticmethod
@@ -73,11 +59,7 @@ class ConfigManager:
         profiles = [f for f in os.listdir('.') if f.startswith('config_') and f.endswith('.txt')]
         if not profiles:
             default = "config_default.txt"
-            ConfigManager.save_single_profile(default, {
-                "dns_list": [], 
-                "domain_list": [],
-                "network_list": ["Default_Network", "MCI", "Irancell", "TCI"]
-            })
+            ConfigManager.save_single_profile(default, {"dns_list": [], "domain_list": [], "network_list": ["Default_Network", "MCI", "Irancell", "TCI"]})
             return [default]
         return sorted(profiles)
 
@@ -94,7 +76,6 @@ class ConfigManager:
                         if line.lower() == "dns list:": current = "dns_list"; continue
                         elif line.lower() == "domain list:": current = "domain_list"; continue
                         elif line.lower() == "network:": current = "network_list"; continue
-                        
                         if current: data[current].append(line)
             except Exception: pass
         return data
@@ -102,29 +83,19 @@ class ConfigManager:
     @staticmethod
     def load_multiple_profiles(filenames):
         merged_data = {"dns_list": [], "domain_list": [], "network_list": []}
-        seen_dns = set()
-        seen_domains = set()
-        seen_networks = set()
-
+        seen_dns = set(); seen_domains = set(); seen_networks = set()
         for fname in filenames:
             data = ConfigManager.load_single_profile(fname)
-            
             for dns in data["dns_list"]:
                 ip_only = dns.split()[0] if dns else ""
                 if ip_only and ip_only not in seen_dns:
-                    seen_dns.add(ip_only)
-                    merged_data["dns_list"].append(dns)
-                    
+                    seen_dns.add(ip_only); merged_data["dns_list"].append(dns)
             for dom in data["domain_list"]:
                 if dom not in seen_domains:
-                    seen_domains.add(dom)
-                    merged_data["domain_list"].append(dom)
-
+                    seen_domains.add(dom); merged_data["domain_list"].append(dom)
             for net in data.get("network_list", []):
                 if net not in seen_networks:
-                    seen_networks.add(net)
-                    merged_data["network_list"].append(net)
-                    
+                    seen_networks.add(net); merged_data["network_list"].append(net)
         return merged_data
 
     @staticmethod
@@ -145,11 +116,7 @@ class ConfigManager:
             if not parts: continue
             ip = parts[0]
             name = parts[1] if len(parts) > 1 else ""
-            is_system = ip in system_dns_list
-            parsed.append({
-                "ip": ip, "name": name, "row_id": f"row_{idx}", 
-                "dup_id": None, "is_system": is_system
-            })
+            parsed.append({"ip": ip, "name": name, "row_id": f"row_{idx}", "dup_id": None, "is_system": ip in system_dns_list})
         return parsed
 
     @staticmethod
@@ -157,7 +124,5 @@ class ConfigManager:
         try:
             clean = raw_domain.replace("http://", "").replace("https://", "")
             parts = clean.split('.')
-            main_name = parts[-2] if len(parts) >= 2 else parts[0]
-            return main_name.capitalize()
-        except Exception:
-            return str(raw_domain).capitalize()
+            return (parts[-2] if len(parts) >= 2 else parts[0]).capitalize()
+        except Exception: return str(raw_domain).capitalize()

@@ -1,4 +1,4 @@
-# Version 44.0 | File: ui_shared.py | Shared UI Elements, Themes, and Engines
+# Version 45.0 | File: ui_shared.py | Shared UI Elements, Themes, and Engines
 import os
 import sys
 import csv
@@ -9,7 +9,7 @@ import customtkinter as ctk
 from datetime import datetime
 from core import NetworkUtils, ConfigManager
 
-APP_VERSION = "44.0"
+APP_VERSION = "45.0"
 
 C_BG = "#131314"
 C_CARD = "#1E1F20"
@@ -24,10 +24,8 @@ C_TEXT_MUTED = "#C4C7C5"
 C_BORDER = "#444746"
 
 def get_resource_path(relative_path):
-    try:
-        base_path = sys._MEIPASS
-    except AttributeError:
-        base_path = os.path.abspath(".")
+    try: base_path = sys._MEIPASS
+    except AttributeError: base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
 class ScrollableTable(ctk.CTkFrame):
@@ -115,7 +113,7 @@ class DataManager:
     @staticmethod
     def export_csv(dns_list, domains, results_data, display_mode, is_scanning):
         if display_mode == "history":
-            messagebox.showwarning("Warning", "Exporting is available for Live scans only. You can find all history data directly in 'benchmark_history.csv'.")
+            messagebox.showwarning("Warning", "Exporting is available for Live scans only.")
             return
         if not results_data or is_scanning:
             messagebox.showwarning("Warning", "Complete a scan before exporting.")
