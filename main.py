@@ -21,7 +21,7 @@ def main():
     
     if platform.system() == "Windows":
         try:
-            myappid = f"bluefalcon.dnsbenchmark.pro.async.v{APP_VERSION}"
+            myappid = f"bluefalcon.dnsbenchmark.pro.v{APP_VERSION}"
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except Exception:
             pass

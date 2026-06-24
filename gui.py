@@ -4,7 +4,7 @@
 import sys
 import logging
 import queue
-import asyncio
+import concurrent.futures
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -60,50 +60,48 @@ class QLogHandler(logging.Handler):
     def emit(self, record):
         self.signal_emitter.new_log.emit(self.format(record))
 
-class AsyncEventLoopThread(QThread):
+class BenchmarkWorker(QThread):
     finished_scan = pyqtSignal()
-
-    def __init__(self, dns_list, domains, timeout, concurrency_limit, result_queue):
+    
+    def __init__(self, dns_list, domains, timeout, retries, workers, result_queue):
         super().__init__()
         self.dns_list = dns_list
         self.domains = domains
         self.timeout = timeout
-        self.limit = concurrency_limit
+        self.retries = retries
+        self.max_workers = workers
         self.result_queue = result_queue
-        self.loop = None
-        self._is_cancelled = False
+        self._is_running = True
+        self.exe = None
 
     def run(self):
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_until_complete(self.main_runner())
-        self.loop.close()
-        self.result_queue.put("DONE")
-        self.finished_scan.emit()
-
-    async def worker_task(self, semaphore, d, dom):
-        if self._is_cancelled:
-            return
-        async with semaphore:
-            try:
-                success, text, t_val = await NetworkUtils.test_dns_domain_async(d["ip"], dom, self.timeout)
-                self.result_queue.put((d["row_id"], dom, success, text, t_val))
-            except Exception:
-                self.result_queue.put((d["row_id"], dom, False, "Err", 0))
-
-    async def main_runner(self):
-        semaphore = asyncio.Semaphore(self.limit)
-        tasks = []
+        logger.info(f"Firing brute-force concurrent executor with {self.max_workers} active threads.")
+        self.exe = concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers)
+        future_map = {}
+        
         for d in self.dns_list:
             for dom in self.domains:
-                tasks.append(self.worker_task(semaphore, d, dom))
-        
-        await asyncio.gather(*tasks, return_exceptions=True)
+                if not self._is_running: break
+                f = self.exe.submit(NetworkUtils.test_dns_domain, d["ip"], dom, self.timeout, self.retries)
+                future_map[f] = (d["row_id"], dom)
+
+        try:
+            for future in concurrent.futures.as_completed(future_map):
+                if not self._is_running: break
+                row_id, domain = future_map[future]
+                try:
+                    success, text, t_val = future.result()
+                    self.result_queue.put((row_id, domain, success, text, t_val))
+                except Exception:
+                    self.result_queue.put((row_id, domain, False, "Err", 0))
+        finally:
+            if self.exe: self.exe.shutdown(wait=False, cancel_futures=True)
+            self.result_queue.put("DONE")
+            self.finished_scan.emit()
 
     def stop(self):
-        self._is_cancelled = True
-        if self.loop and self.loop.is_running():
-            self.loop.call_soon_threadsafe(self.loop.stop)
+        self._is_running = False
+        if self.exe: self.exe.shutdown(wait=False, cancel_futures=True)
 
 class AddDNSDialog(QDialog):
     def __init__(self, parent=None):
@@ -136,12 +134,14 @@ class PreferencesWindow(QDialog):
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
+        
         self.tab_profiles = QWidget()
         self.tab_settings = QWidget()
         self.tab_about = QWidget()
         self.tabs.addTab(self.tab_profiles, "📁 Profile Builder")
         self.tabs.addTab(self.tab_settings, "⚙️ Settings")
         self.tabs.addTab(self.tab_about, "ℹ️ About")
+        
         self.build_profile_tab()
         self.build_settings_tab()
         self.build_about_tab()
@@ -161,9 +161,7 @@ class PreferencesWindow(QDialog):
         layout.addLayout(top_layout)
 
         grid = QGridLayout()
-        self.list_dns = QListWidget()
-        self.list_domains = QListWidget()
-        self.list_nets = QListWidget()
+        self.list_dns, self.list_domains, self.list_nets = QListWidget(), QListWidget(), QListWidget()
         grid.addWidget(QLabel("<b>DNS Servers</b>"), 0, 0)
         grid.addWidget(QLabel("<b>Domains</b>"), 0, 1)
         grid.addWidget(QLabel("<b>Networks</b>"), 0, 2)
@@ -245,14 +243,22 @@ class PreferencesWindow(QDialog):
     def build_settings_tab(self):
         layout = QVBoxLayout(self.tab_settings)
         g = QGridLayout()
+        
         g.addWidget(QLabel("Connection Timeout (Seconds):"), 0, 0)
-        self.input_timeout = QLineEdit(str(self.parent_app.current_timeout if self.parent_app else 5.0))
+        self.input_timeout = QLineEdit(str(self.parent_app.current_timeout if self.parent_app else 3.0))
         self.input_timeout.setValidator(QDoubleValidator(0.1, 30.0, 1))
         g.addWidget(self.input_timeout, 0, 1)
-        g.addWidget(QLabel("Async Concurrency Max Limit:"), 1, 0)
-        self.input_threads = QLineEdit(str(self.parent_app.current_workers if self.parent_app else 500))
+        
+        g.addWidget(QLabel("DNS Retries (per target):"), 1, 0)
+        self.input_retries = QLineEdit(str(self.parent_app.current_retries if self.parent_app else 1))
+        self.input_retries.setValidator(QIntValidator(1, 10))
+        g.addWidget(self.input_retries, 1, 1)
+
+        g.addWidget(QLabel("Brute-Force Thread Limit:"), 2, 0)
+        self.input_threads = QLineEdit(str(self.parent_app.current_workers if self.parent_app else 2000))
         self.input_threads.setValidator(QIntValidator(1, 10000))
-        g.addWidget(self.input_threads, 1, 1)
+        g.addWidget(self.input_threads, 2, 1)
+        
         layout.addLayout(g)
         layout.addStretch()
         btn_apply = QPushButton("Apply Settings")
@@ -262,6 +268,7 @@ class PreferencesWindow(QDialog):
     def apply_settings(self):
         if self.parent_app:
             self.parent_app.current_timeout = float(self.input_timeout.text())
+            self.parent_app.current_retries = int(self.input_retries.text())
             self.parent_app.current_workers = int(self.input_threads.text())
             QMessageBox.information(self, "Applied", "Engine throttles configured.")
 
@@ -271,7 +278,7 @@ class PreferencesWindow(QDialog):
         lbl_title = QLabel("<b>BlueFalcon DNS Benchmark Pro</b>")
         lbl_title.setFont(QFont("Segoe UI", 22))
         layout.addWidget(lbl_title, alignment=Qt.AlignmentFlag.AlignCenter)
-        lbl_version = QLabel(f"Version {APP_VERSION} (Async Engine)")
+        lbl_version = QLabel(f"Version {APP_VERSION}")
         lbl_version.setStyleSheet(f"color: {C_PRIMARY};")
         layout.addWidget(lbl_version, alignment=Qt.AlignmentFlag.AlignCenter)
         btn_github = QPushButton("🌐 View Source on GitHub")
@@ -287,8 +294,11 @@ class ModernDNSApp(QMainWindow):
         icon_path = AppUtils.get_resource_path("icon.ico")
         if icon_path.exists(): self.setWindowIcon(QIcon(str(icon_path)))
         
+        # Performance Vars
         self.current_timeout = 3.0
-        self.current_workers = 500
+        self.current_retries = 1
+        self.current_workers = 2000
+        
         self.active_profiles = []
         self.system_dns = NetworkUtils.get_system_dns()
         self.dns_list, self.domains, self.results_data = [], [], {}
@@ -439,6 +449,11 @@ class ModernDNSApp(QMainWindow):
             self.set_progress_state("aborted")
             if self.worker: self.worker.stop()
             self.queue_timer.stop()
+            
+            while not self.result_queue.empty():
+                try: self.result_queue.get_nowait()
+                except queue.Empty: break
+                    
             self.btn_start.setText("🚀 Start Benchmark")
             self.combo_net.setEnabled(True)
             self.combo_profile_main.setEnabled(True)
@@ -454,9 +469,13 @@ class ModernDNSApp(QMainWindow):
         self.combo_net.setEnabled(False)
         self.combo_profile_main.setEnabled(False)
         self.btn_start.setText("🛑 Stop Scan")
-        self.lbl_status.setText("Benchmarking (Async)...")
+        self.lbl_status.setText("Benchmarking...")
 
-        self.worker = AsyncEventLoopThread(self.dns_list, self.domains, self.current_timeout, self.current_workers, self.result_queue)
+        while not self.result_queue.empty():
+            try: self.result_queue.get_nowait()
+            except queue.Empty: break
+
+        self.worker = BenchmarkWorker(self.dns_list, self.domains, self.current_timeout, self.current_retries, self.current_workers, self.result_queue)
         self.worker.finished_scan.connect(self.scan_finished)
         self.worker.start()
         self.queue_timer.start(33)
@@ -481,7 +500,7 @@ class ModernDNSApp(QMainWindow):
         if self.result_queue.empty(): return
         processed = 0
         self.table.setUpdatesEnabled(False)
-        while not self.result_queue.empty() and processed < 300:
+        while not self.result_queue.empty() and processed < 200:
             try:
                 item = self.result_queue.get_nowait()
                 if item == "DONE": break

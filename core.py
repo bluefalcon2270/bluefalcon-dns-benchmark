@@ -3,14 +3,14 @@
 # ==========================================
 import sys
 import time
-import asyncio
+import socket
 import subprocess
 import ctypes
 import logging
 from pathlib import Path
-import dns.asyncresolver
+import dns.resolver
 
-APP_VERSION = "3.0"
+APP_VERSION = "2.7"
 
 BASE_DIR = Path.cwd()
 LOG_FILE = BASE_DIR / "bluefalcon-app.log"
@@ -19,32 +19,20 @@ logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S",
-    handlers=[
-        logging.FileHandler(LOG_FILE, mode='a', encoding='utf-8'),
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.FileHandler(LOG_FILE, mode='a', encoding='utf-8'), logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger("BlueFalconCore")
 
 class AppUtils:
     @staticmethod
     def get_resource_path(relative_path: str) -> Path:
-        try:
-            base_path = Path(sys._MEIPASS)
-        except Exception:
-            base_path = BASE_DIR
+        base_path = Path(sys._MEIPASS) if hasattr(sys, "_MEIPASS") else BASE_DIR
         return base_path / relative_path
 
     @staticmethod
     def is_admin() -> bool:
-        try:
-            return ctypes.windll.shell32.IsUserAnAdmin() != 0
-        except Exception:
-            return False
-
-    @staticmethod
-    def check_internet_connection() -> bool:
-        return True
+        try: return ctypes.windll.shell32.IsUserAnAdmin() != 0
+        except: return False
 
 class NetworkUtils:
     @staticmethod
@@ -55,70 +43,54 @@ class NetworkUtils:
             output = subprocess.check_output(cmd, text=True, creationflags=0x08000000)
             for line in output.splitlines():
                 ip = line.strip()
-                if ip and ip not in system_dns: 
-                    system_dns.append(ip)
-            if system_dns: 
-                return system_dns
-        except Exception as e:
-            logger.warning(f"Failed to fetch System DNS via PowerShell: {e}")
-                
-        return ["1.1.1.1"]
+                if ip and ip not in system_dns: system_dns.append(ip)
+        except: pass
+        return system_dns if system_dns else ["1.1.1.1"]
 
     @staticmethod
-    async def tcp_test_async(ip: str, port: int, timeout: float) -> tuple[bool, str | int]:
+    def tcp_test(ip: str, port: int, timeout: float) -> tuple[bool, str | int]:
         try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
             t0 = time.time()
-            conn = asyncio.open_connection(ip, port)
-            reader, writer = await asyncio.wait_for(conn, timeout=timeout)
-            dt = (time.time() - t0) * 1000
-            try:
-                writer.close()
-                await writer.wait_closed()
-            except Exception:
-                pass
-            return True, round(dt)
-        except asyncio.TimeoutError:
-            return False, "TCP Timeout"
-        except Exception: 
-            return False, "TCP Err"
+            sock.connect((ip, port))
+            dt = round((time.time() - t0) * 1000)
+            sock.close()
+            return True, f"{dt} ms", dt
+        except: return False, "Timeout", 0
 
     @staticmethod
-    async def test_dns_domain_async(dns_ip: str, domain: str, timeout: float) -> tuple[bool, str, int]:
-        resolver = dns.asyncresolver.Resolver(configure=False)
+    def test_dns_domain(dns_ip: str, domain: str, timeout: float, retries: int) -> tuple[bool, str, int]:
+        resolver = dns.resolver.Resolver(configure=False)
         resolver.nameservers = [dns_ip]
-        resolver.timeout = float(timeout)
+        
+        # Enforce exact retry logic. Total time = lifetime. Time per try = timeout.
         resolver.lifetime = float(timeout)
+        resolver.timeout = float(timeout) / max(1.0, float(retries))
         
         try:
-            ans = await resolver.resolve(domain, "A")
+            ans = resolver.resolve(domain, "A", lifetime=timeout)
             ips = [x.to_text() for x in ans]
-            if not ips: 
-                return False, "No IP", 0
-                
-            ok, t_res = await NetworkUtils.tcp_test_async(ips[0], 443, timeout)
-            if ok: 
-                return True, f"{t_res} ms", t_res
-            else: 
-                return False, str(t_res), 0
+            if not ips: return False, "No IP", 0
+            
+            # The TCP test does not need retries, just a hard timeout
+            ok, t_res = NetworkUtils.tcp_test(ips[0], 443, float(timeout))
+            if ok: return True, f"{t_res} ms", t_res
+            else: return False, str(t_res), 0
                 
         except dns.resolver.NXDOMAIN: return False, "NXDOMAIN", 0
         except dns.resolver.NoAnswer: return False, "No Answer", 0
         except dns.resolver.NoNameservers: return False, "ServFail", 0
-        except (dns.exception.Timeout, asyncio.TimeoutError): return False, "DNS Timeout", 0
+        except dns.exception.Timeout: return False, "DNS Timeout", 0
         except Exception: return False, "?", 0
 
 class ConfigManager:
     @staticmethod
     def get_available_profiles() -> list[str]:
-        profiles = [p.name for p in BASE_DIR.glob("config_*.txt") if p.is_file()]
+        profiles = [p.name for p in BASE_DIR.glob("config_*.txt")]
         if not profiles:
-            default = "config_default.txt"
-            ConfigManager.save_single_profile(default, {
-                "dns_list": ["1.1.1.1 Cloudflare", "8.8.8.8 Google"], 
-                "domain_list": ["google.com", "cloudflare.com"],
-                "network_list": ["Default_Network"]
-            })
-            return [default]
+            ConfigManager.save_single_profile("config_default.txt", {"dns_list": ["1.1.1.1 Cloudflare", "8.8.8.8 Google"], "domain_list": ["google.com"], "network_list": ["Default"]})
+            return ["config_default.txt"]
         return sorted(profiles)
 
     @staticmethod
@@ -126,27 +98,21 @@ class ConfigManager:
         data = {"dns_list": [], "domain_list": [], "network_list": []}
         filepath = BASE_DIR / filename
         if filepath.exists():
-            try:
-                with filepath.open("r", encoding="utf-8") as f:
-                    current = None
-                    for line in f:
-                        line = line.strip()
-                        if not line: continue
-                        if line.lower() == "dns list:": current = "dns_list"; continue
-                        elif line.lower() == "domain list:": current = "domain_list"; continue
-                        elif line.lower() == "network:": current = "network_list"; continue
-                        
-                        if current: data[current].append(line)
-            except Exception as e:
-                logger.error(f"Failed to load profile {filename}: {e}")
+            with filepath.open("r", encoding="utf-8") as f:
+                curr = None
+                for line in f:
+                    line = line.strip()
+                    if not line: continue
+                    if "DNS List" in line: curr = "dns_list"
+                    elif "Domain List" in line: curr = "domain_list"
+                    elif "Network" in line: curr = "network_list"
+                    elif curr: data[curr].append(line)
         return data
 
     @staticmethod
     def load_multiple_profiles(filenames: list[str]) -> dict:
         merged_data = {"dns_list": [], "domain_list": [], "network_list": []}
-        seen_dns = set()
-        seen_domains = set()
-        seen_networks = set()
+        seen_dns, seen_domains, seen_networks = set(), set(), set()
 
         for fname in filenames:
             data = ConfigManager.load_single_profile(fname)
@@ -167,38 +133,14 @@ class ConfigManager:
 
     @staticmethod
     def save_single_profile(filename: str, data: dict):
-        filepath = BASE_DIR / filename
-        try:
-            with filepath.open("w", encoding="utf-8") as f:
-                f.write("DNS List:\n")
-                for item in data.get("dns_list", []): f.write(f"{item}\n")
-                f.write("\n\nDomain List:\n")
-                for item in data.get("domain_list", []): f.write(f"{item}\n")
-                f.write("\n\nNetwork:\n")
-                for item in data.get("network_list", []): f.write(f"{item}\n")
-        except Exception as e:
-            logger.error(f"Failed to save profile {filename}: {e}")
+        with (BASE_DIR / filename).open("w", encoding="utf-8") as f:
+            f.write("DNS List:\n" + "\n".join(data.get("dns_list", [])) + "\n\nDomain List:\n" + "\n".join(data.get("domain_list", [])) + "\n\nNetwork:\n" + "\n".join(data.get("network_list", [])))
 
     @staticmethod
-    def parse_dns_list(lines: list[str], system_dns_list: list[str]) -> list[dict]:
-        parsed = []
-        for idx, line in enumerate(lines):
-            parts = line.split(maxsplit=1)
-            if not parts: continue
-            ip = parts[0]
-            name = parts[1] if len(parts) > 1 else ""
-            parsed.append({
-                "ip": ip, "name": name, "row_id": f"row_{idx}", 
-                "is_system": ip in system_dns_list
-            })
-        return parsed
+    def parse_dns_list(lines: list[str], sys_dns: list[str]) -> list[dict]:
+        return [{"ip": l.split()[0], "name": " ".join(l.split()[1:]), "row_id": f"r{i}", "is_system": l.split()[0] in sys_dns} for i, l in enumerate(lines)]
 
     @staticmethod
     def format_domain(raw_domain: str) -> str:
-        try:
-            clean = raw_domain.replace("http://", "").replace("https://", "")
-            parts = clean.split('.')
-            main_name = parts[-2] if len(parts) >= 2 else parts[0]
-            return main_name.capitalize()
-        except Exception:
-            return str(raw_domain).capitalize()
+        parts = raw_domain.replace("http://", "").replace("https://", "").split('.')
+        return (parts[-2] if len(parts) >= 2 else parts[0]).capitalize()
