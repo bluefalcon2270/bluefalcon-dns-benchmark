@@ -1,4 +1,4 @@
-# Version 42.0 | File: ui_shared.py | Shared UI Elements, Themes, and Engines
+# Version 43.0 | File: ui_shared.py | Shared UI Elements, Themes, and Engines
 import os
 import sys
 import csv
@@ -12,7 +12,7 @@ from core import NetworkUtils, ConfigManager
 # ==========================================
 # Application Configuration & Constants
 # ==========================================
-APP_VERSION = "42.0"
+APP_VERSION = "43.0"
 
 # Material Design 3 (Google) Dark Theme Colors
 C_BG = "#131314"            # Deep App Background
@@ -34,6 +34,14 @@ def get_resource_path(relative_path):
     except AttributeError:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
+
+def get_status_icon(ping_ms, is_error=False):
+    """ Returns the appropriate high-performance Unicode emoji status indicator """
+    if is_error: return "🔴"
+    if ping_ms == -1: return "🔴"
+    if ping_ms < 100: return "🟢"
+    if ping_ms < 200: return "🟩"
+    return "🟨"
 
 # ==========================================
 # Custom Widgets

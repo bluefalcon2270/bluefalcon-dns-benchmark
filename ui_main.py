@@ -1,4 +1,4 @@
-# Version 42.0 | File: ui_main.py | Main Dashboard and Event Loop
+# Version 43.0 | File: ui_main.py | Main Dashboard and Event Loop
 import os
 import sys
 import threading
@@ -10,7 +10,7 @@ from tkinter import messagebox
 import pandas as pd
 
 from core import NetworkUtils, ConfigManager
-from ui_shared import C_BG, C_CARD, C_PRIMARY, C_PRIMARY_BG, C_SUCCESS, C_ERROR, C_WARNING, C_TEXT_MAIN, C_TEXT_MUTED, C_BORDER, APP_VERSION, get_resource_path, ScrollableTable, ScannerEngine, DataManager
+from ui_shared import C_BG, C_CARD, C_PRIMARY, C_PRIMARY_BG, C_SUCCESS, C_ERROR, C_WARNING, C_TEXT_MAIN, C_TEXT_MUTED, C_BORDER, APP_VERSION, get_resource_path, get_status_icon, ScrollableTable, ScannerEngine, DataManager
 from ui_preferences import PreferencesBuilder
 
 ctk.set_appearance_mode("Dark")
@@ -77,36 +77,51 @@ class ModernDNSApp(ctk.CTk):
         self.control_card = ctk.CTkFrame(self, fg_color=C_CARD, corner_radius=24)
         self.control_card.pack(fill="x", padx=30, pady=(30, 20), ipady=12)
 
-        self.btn_start = ctk.CTkButton(self.control_card, text="🚀 Start Benchmark", font=("Segoe UI", 14, "bold"),
+        # Left Side Container
+        left_frame = ctk.CTkFrame(self.control_card, fg_color="transparent")
+        left_frame.pack(side="left", padx=20, fill="y")
+
+        self.btn_start = ctk.CTkButton(left_frame, text="🚀 Start Benchmark", font=("Segoe UI", 14, "bold"),
                                        command=self.toggle_scan, fg_color=C_PRIMARY_BG, text_color=C_TEXT_MAIN, 
                                        hover_color="#0842A0", corner_radius=24, width=160, height=40)
-        self.btn_start.pack(side="left", padx=(20, 10), pady=10)
+        self.btn_start.pack(side="left")
         
-        self.progress_bar = ctk.CTkProgressBar(self.control_card, width=150, height=8, progress_color=C_PRIMARY, fg_color=C_BG)
-        self.progress_bar.pack(side="left", padx=(0, 10))
+        # New Overlaid Progress Bar Pill
+        self.progress_container = ctk.CTkFrame(left_frame, fg_color=C_BG, corner_radius=24, width=200, height=40)
+        self.progress_container.pack_propagate(False)
+        self.progress_container.pack(side="left", padx=(15, 0), pady=10)
+
+        self.progress_bar = ctk.CTkProgressBar(self.progress_container, width=200, height=40, progress_color=C_PRIMARY, fg_color=C_BG, corner_radius=24)
+        self.progress_bar.place(relx=0.5, rely=0.5, anchor="center")
         self.progress_bar.set(0)
 
-        self.lbl_status = ctk.CTkLabel(self.control_card, text="No Configuration Loaded", text_color=C_WARNING, font=("Segoe UI", 13, "bold"))
-        self.lbl_status.pack(side="left", padx=(0, 15))
+        # Centered Text over Progress Bar
+        self.lbl_progress_text = ctk.CTkLabel(self.progress_container, text="", text_color=C_BG, font=("Segoe UI", 13, "bold"))
+        self.lbl_progress_text.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Status Label follows the Progress Bar
+        self.lbl_status = ctk.CTkLabel(left_frame, text="No Configuration Loaded", text_color=C_WARNING, font=("Segoe UI", 13, "bold"))
+        self.lbl_status.pack(side="left", padx=(20, 0))
         
-        ctk.CTkLabel(self.control_card, text="Network:", font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED).pack(side="left", padx=(5, 5))
-        self.combo_network = ctk.CTkComboBox(self.control_card, variable=self.selected_network_var, values=["Default"], width=120, height=36, fg_color=C_BG, corner_radius=8, border_color=C_BORDER)
-        self.combo_network.pack(side="left", padx=(0, 15))
+        # Right Side Container
+        right_frame = ctk.CTkFrame(self.control_card, fg_color="transparent")
+        right_frame.pack(side="right", padx=20, fill="y")
 
-        ctk.CTkLabel(self.control_card, text="Profile:", font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED).pack(side="left", padx=(5, 5))
-        self.combo_profile = ctk.CTkComboBox(self.control_card, variable=self.selected_profile_var, values=["Select Profile"], width=140, height=36, fg_color=C_BG, corner_radius=8, border_color=C_BORDER, command=self.on_profile_select)
-        self.combo_profile.pack(side="left", padx=(0, 15))
-
-        self.btn_prefs = ctk.CTkButton(self.control_card, text="⚙️", font=("Segoe UI Emoji", 24), command=self.open_preferences,
+        self.btn_prefs = ctk.CTkButton(right_frame, text="⚙️", font=("Segoe UI Emoji", 24), command=self.open_preferences,
                                       fg_color="transparent", text_color=C_TEXT_MAIN, hover_color=C_BORDER, corner_radius=24, width=44, height=44)
-        self.btn_prefs.pack(side="right", padx=(5, 20))
+        self.btn_prefs.pack(side="right", pady=8)
 
-        self.btn_sort = ctk.CTkButton(self.control_card, text="🔽 Sort", font=("Segoe UI", 13, "bold"), command=self.sort_results,
+        self.btn_sort = ctk.CTkButton(right_frame, text="🔽 Sort", font=("Segoe UI", 13, "bold"), command=self.sort_results,
                                       fg_color="transparent", text_color=C_TEXT_MAIN, border_width=1, border_color=C_BORDER, hover_color=C_BG, corner_radius=24, width=80, height=36)
-        self.btn_sort.pack(side="right", padx=5)
+        self.btn_sort.pack(side="right", padx=(10, 15))
 
-        self.lbl_progress_text = ctk.CTkLabel(self.control_card, text="", text_color=C_PRIMARY, font=("Segoe UI", 13, "bold"))
-        self.lbl_progress_text.pack(side="right", padx=10)
+        self.combo_profile = ctk.CTkComboBox(right_frame, variable=self.selected_profile_var, values=["Select Profile"], width=140, height=36, fg_color=C_BG, corner_radius=8, border_color=C_BORDER, command=self.on_profile_select)
+        self.combo_profile.pack(side="right", padx=(5, 10))
+        ctk.CTkLabel(right_frame, text="Profile:", font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED).pack(side="right")
+
+        self.combo_network = ctk.CTkComboBox(right_frame, variable=self.selected_network_var, values=["Default"], width=120, height=36, fg_color=C_BG, corner_radius=8, border_color=C_BORDER)
+        self.combo_network.pack(side="right", padx=(5, 15))
+        ctk.CTkLabel(right_frame, text="Network:", font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED).pack(side="right")
 
         self.table_scroll = ScrollableTable(self)
         self.table_scroll.pack(padx=30, pady=(0, 30), fill="both", expand=True)
@@ -170,11 +185,12 @@ class ModernDNSApp(ctk.CTk):
             if iid:
                 vals = self.table_scroll.tree.item(iid, "values")
                 if vals and len(vals) > 1:
-                    ip = str(vals[1]).split()[0]
+                    # Index 1 is now strictly the isolated DNS Address
+                    ip_clean = str(vals[1]).replace("[System]", "").strip()
                     self.clipboard_clear()
-                    self.clipboard_append(ip)
+                    self.clipboard_append(ip_clean)
                     self.update()
-                    self.lbl_status.configure(text=f"Copied: {ip}", text_color=C_SUCCESS)
+                    self.lbl_status.configure(text=f"Copied: {ip_clean}", text_color=C_SUCCESS)
 
     def build_grid(self):
         for item in self.table_scroll.tree.get_children():
@@ -185,67 +201,83 @@ class ModernDNSApp(ctk.CTk):
             if not getattr(self, "history_results", None):
                 return
 
-            columns = ["id", "server", "errors", "ping", "tests"]
+            columns = ["id", "address", "name", "errors", "ping", "tests"]
             self.table_scroll.tree.configure(columns=columns)
             
-            self.table_scroll.tree.heading("id", text="#")
-            self.table_scroll.tree.column("id", width=50, anchor="center")
+            self.table_scroll.tree.heading("id", text="#", anchor="center")
+            self.table_scroll.tree.column("id", width=40, anchor="center")
             
-            self.table_scroll.tree.heading("server", text="DNS Server")
-            self.table_scroll.tree.column("server", width=250, anchor="w")
+            self.table_scroll.tree.heading("address", text="DNS Address", anchor="center")
+            self.table_scroll.tree.column("address", width=140, anchor="w")
+
+            self.table_scroll.tree.heading("name", text="DNS Name", anchor="center")
+            self.table_scroll.tree.column("name", width=120, anchor="center")
             
-            self.table_scroll.tree.heading("errors", text="Avg Errors")
-            self.table_scroll.tree.column("errors", width=120, anchor="center")
+            self.table_scroll.tree.heading("errors", text="Avg Errors", anchor="center")
+            self.table_scroll.tree.column("errors", width=100, anchor="center")
             
-            self.table_scroll.tree.heading("ping", text="Avg Ping (ms)")
+            self.table_scroll.tree.heading("ping", text="Avg Ping (ms)", anchor="center")
             self.table_scroll.tree.column("ping", width=120, anchor="center")
             
-            self.table_scroll.tree.heading("tests", text="Tests Sent")
-            self.table_scroll.tree.column("tests", width=120, anchor="center")
+            self.table_scroll.tree.heading("tests", text="Tests Sent", anchor="center")
+            self.table_scroll.tree.column("tests", width=100, anchor="center")
 
             for row_index, row_data in enumerate(self.history_results):
-                srv_name = f" {row_data['DNS_Name']}" if row_data['DNS_Name'] else ""
-                srv_text = f"{row_data['DNS_IP']}{srv_name}"
                 ping_val = row_data['Avg_Ping']
-                ping_str = f"{round(ping_val)} ms" if ping_val != -1 else "Failed"
+                icon = get_status_icon(ping_val, is_error=(ping_val == -1))
+                ping_str = f"{icon} {round(ping_val)} ms" if ping_val != -1 else f"{icon} Failed"
                 
-                values = [row_index + 1, srv_text, round(row_data['Avg_Errors'], 2), ping_str, int(row_data['Test_Count'])]
+                err_val = round(row_data['Avg_Errors'], 2)
+                err_icon = "🔴" if err_val > 0 else "🟢"
+                
+                values = [row_index + 1, row_data['DNS_IP'], row_data['DNS_Name'], f"{err_icon} {err_val}", ping_str, int(row_data['Test_Count'])]
                 self.table_scroll.tree.insert("", "end", values=values)
             return
 
         if not self.active_profiles:
             self.table_scroll.tree.configure(columns=["msg"])
-            self.table_scroll.tree.heading("msg", text="No Configuration Loaded. Use the Profile dropdown to select files.")
+            self.table_scroll.tree.heading("msg", text="No Configuration Loaded. Use the Profile dropdown to select files.", anchor="w")
             self.table_scroll.tree.column("msg", width=800, anchor="w")
             return
 
         if not self.dns_list or not self.domains:
             self.table_scroll.tree.configure(columns=["msg"])
-            self.table_scroll.tree.heading("msg", text="Selected profile(s) are empty. Please add data via Settings.")
+            self.table_scroll.tree.heading("msg", text="Selected profile(s) are empty. Please add data via Settings.", anchor="w")
             self.table_scroll.tree.column("msg", width=800, anchor="w")
             return
 
         display_domains = [ConfigManager.format_domain(d) for d in self.domains]
-        columns = ["id", "server", "errors", "ping"] + self.domains
+        columns = ["id", "address", "name", "errors", "ping"] + self.domains
         self.table_scroll.tree.configure(columns=columns)
 
-        self.table_scroll.tree.heading("id", text="#"); self.table_scroll.tree.column("id", width=50, anchor="center")
-        self.table_scroll.tree.heading("server", text="DNS Server"); self.table_scroll.tree.column("server", width=220, anchor="w")
-        self.table_scroll.tree.heading("errors", text="Errors"); self.table_scroll.tree.column("errors", width=80, anchor="center")
-        self.table_scroll.tree.heading("ping", text="Avg Ping"); self.table_scroll.tree.column("ping", width=100, anchor="center")
+        self.table_scroll.tree.heading("id", text="#", anchor="center")
+        self.table_scroll.tree.column("id", width=40, anchor="center")
+
+        self.table_scroll.tree.heading("address", text="DNS Address", anchor="center")
+        self.table_scroll.tree.column("address", width=130, anchor="w")
+
+        self.table_scroll.tree.heading("name", text="DNS Name", anchor="center")
+        self.table_scroll.tree.column("name", width=100, anchor="center")
+
+        self.table_scroll.tree.heading("errors", text="Errors", anchor="center")
+        self.table_scroll.tree.column("errors", width=70, anchor="center")
+
+        self.table_scroll.tree.heading("ping", text="Avg Ping", anchor="center")
+        self.table_scroll.tree.column("ping", width=100, anchor="center")
 
         for i, d in enumerate(self.domains):
-            self.table_scroll.tree.heading(d, text=display_domains[i])
+            self.table_scroll.tree.heading(d, text=display_domains[i], anchor="center")
             self.table_scroll.tree.column(d, width=120, anchor="center")
 
         for row_index, info in enumerate(self.dns_list):
             row_id = info["row_id"]
-            srv_text = info["ip"]
-            if info["is_system"]: srv_text += " [System]"
-            if info["name"]: srv_text += f" {info['name']}"
+            
+            addr_text = info["ip"]
+            if info["is_system"]: addr_text += " [System]"
+            name_text = info["name"]
 
             avg, err_text = DataManager.calculate_metrics(self.results_data, row_id, self.domains)
-            values = [row_index + 1, srv_text, err_text, avg] + ["-"] * len(self.domains)
+            values = [row_index + 1, addr_text, name_text, err_text, avg] + ["-"] * len(self.domains)
             
             iid = self.table_scroll.tree.insert("", "end", iid=row_id, values=values)
             self.tree_items[row_id] = iid
@@ -272,7 +304,7 @@ class ModernDNSApp(ctk.CTk):
         self.total_tasks = len(self.dns_list) * len(self.domains)
         self.completed_tasks = 0
         self.progress_bar.set(0)
-        self.lbl_progress_text.configure(text=f"0 / {self.total_tasks}")
+        self.lbl_progress_text.configure(text=f"0 / {self.total_tasks}", text_color=C_TEXT_MAIN)
         self.combo_network.configure(state="disabled")
         
         self.btn_start.configure(text="🛑 Stop Scan", fg_color="#8C1D18", text_color=C_TEXT_MAIN, hover_color="#601410")
@@ -281,9 +313,9 @@ class ModernDNSApp(ctk.CTk):
         for row_id in self.tree_items:
             iid = self.tree_items[row_id]
             vals = list(self.table_scroll.tree.item(iid, "values"))
-            vals[2] = "-"
             vals[3] = "-"
-            for i in range(4, len(vals)):
+            vals[4] = "-"
+            for i in range(5, len(vals)):
                 vals[i] = "..."
             self.table_scroll.tree.item(iid, values=vals)
 
@@ -301,7 +333,7 @@ class ModernDNSApp(ctk.CTk):
                         self.btn_start.configure(state="normal", text="🚀 Start Benchmark", fg_color=C_PRIMARY_BG, text_color=C_TEXT_MAIN, hover_color="#0842A0")
                         self.combo_network.configure(state="normal")
                         self.progress_bar.set(1.0)
-                        self.lbl_progress_text.configure(text=f"{self.total_tasks} / {self.total_tasks}")
+                        self.lbl_progress_text.configure(text=f"{self.total_tasks} / {self.total_tasks}", text_color=C_BG)
                         
                         if self.stop_event.is_set():
                             self.lbl_status.configure(text="Scan Aborted", text_color=C_ERROR)
@@ -314,14 +346,20 @@ class ModernDNSApp(ctk.CTk):
                             iid = self.tree_items[r_id]
                             current_vals = list(self.table_scroll.tree.item(iid, "values"))
                             avg, err_text = DataManager.calculate_metrics(self.results_data, r_id, self.domains)
-                            current_vals[2] = err_text
-                            current_vals[3] = avg
+                            
+                            ping_num = int(avg.replace(" ms", "")) if "ms" in avg else -1
+                            err_num = int(err_text) if err_text != "-" else len(self.domains)
+                            
+                            current_vals[3] = f"{'🔴' if err_num > 0 else '🟢'} {err_text}"
+                            current_vals[4] = f"{get_status_icon(ping_num, is_error=(ping_num==-1))} {avg}"
+                            
                             self.table_scroll.tree.item(iid, values=current_vals)
                     else:
                         self.completed_tasks += 1
                         if self.total_tasks > 0:
-                            self.progress_bar.set(self.completed_tasks / self.total_tasks)
-                            self.lbl_progress_text.configure(text=f"{self.completed_tasks} / {self.total_tasks}")
+                            progress_ratio = self.completed_tasks / self.total_tasks
+                            self.progress_bar.set(progress_ratio)
+                            self.lbl_progress_text.configure(text=f"{self.completed_tasks} / {self.total_tasks}", text_color=C_BG if progress_ratio > 0.5 else C_TEXT_MAIN)
 
                         self.results_data[row_id][domain] = {"success": success, "text": text, "time": time_val}
 
@@ -329,8 +367,9 @@ class ModernDNSApp(ctk.CTk):
                             iid = self.tree_items[row_id]
                             current_vals = list(self.table_scroll.tree.item(iid, "values"))
                             try:
-                                dom_idx = 4 + self.domains.index(domain)
-                                current_vals[dom_idx] = text if success else f"❌ {text}"
+                                dom_idx = 5 + self.domains.index(domain)
+                                icon = get_status_icon(time_val, is_error=not success)
+                                current_vals[dom_idx] = f"{icon} {text}" if success else f"❌ {text}"
                                 self.table_scroll.tree.item(iid, values=current_vals)
                             except ValueError:
                                 pass
@@ -378,13 +417,18 @@ class ModernDNSApp(ctk.CTk):
                     current_vals = list(self.table_scroll.tree.item(iid, "values"))
                     
                     avg, err_text = DataManager.calculate_metrics(self.results_data, row_id, self.domains)
-                    current_vals[2] = err_text
-                    current_vals[3] = avg
+                    
+                    ping_num = int(avg.replace(" ms", "")) if "ms" in avg else -1
+                    err_num = int(err_text) if err_text != "-" else len(self.domains)
+                    
+                    current_vals[3] = f"{'🔴' if err_num > 0 else '🟢'} {err_text}"
+                    current_vals[4] = f"{get_status_icon(ping_num, is_error=(ping_num==-1))} {avg}"
                     
                     for dom, res in dom_data.items():
                         try:
-                            dom_idx = 4 + self.domains.index(dom)
-                            current_vals[dom_idx] = res["text"] if res["success"] else f"❌ {res.get('text', 'Err')}"
+                            dom_idx = 5 + self.domains.index(dom)
+                            icon = get_status_icon(res.get("time", 0), is_error=not res["success"])
+                            current_vals[dom_idx] = f"{icon} {res['text']}" if res["success"] else f"❌ {res.get('text', 'Err')}"
                         except Exception: pass
                         
                     self.table_scroll.tree.item(iid, values=current_vals)

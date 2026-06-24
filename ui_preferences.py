@@ -1,4 +1,4 @@
-# Version 42.0 | File: ui_preferences.py | Preferences and Settings Modal
+# Version 43.0 | File: ui_preferences.py | Preferences and Settings Modal
 import os
 import re
 import webbrowser
