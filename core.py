@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 import dns.resolver
 
-APP_VERSION = "2.5"
+APP_VERSION = "2.6"
 
 # Setup Paths - Force CWD so files are always created next to the execution context
 BASE_DIR = Path.cwd()
@@ -20,7 +20,7 @@ LOG_FILE = BASE_DIR / "bluefalcon-app.log"
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    datefmt="%H:%M:%S",
     handlers=[
         logging.FileHandler(LOG_FILE, mode='a', encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
@@ -31,7 +31,7 @@ logger = logging.getLogger("BlueFalconCore")
 class AppUtils:
     @staticmethod
     def get_resource_path(relative_path: str) -> Path:
-        """ Resolves absolute path to bundled resources. """
+        """ Resolves absolute path to bundled resources for PyInstaller. """
         try:
             base_path = Path(sys._MEIPASS)
         except Exception:
@@ -76,7 +76,7 @@ class NetworkUtils:
             return resolver.nameservers
         except Exception as e:
             logger.warning(f"Failed to fetch System DNS via fallback: {e}")
-            return []
+            return ["1.1.1.1"]
 
     @staticmethod
     def tcp_test(ip: str, port: int, timeout: float) -> tuple[bool, str | int]:

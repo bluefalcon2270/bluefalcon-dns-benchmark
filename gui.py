@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QUrl, QTimer
 from PyQt6.QtGui import QFont, QColor, QIntValidator, QDoubleValidator, QDesktopServices, QIcon
 
-from core import APP_VERSION, AppUtils, NetworkUtils, ConfigManager, logger, LOG_FILE, BASE_DIR
+from core import APP_VERSION, AppUtils, NetworkUtils, ConfigManager, logger, BASE_DIR
 
 # Material Design 3 Dark Theme Colors
 C_SURFACE = "#131314"
@@ -437,6 +437,10 @@ class ModernDNSApp(QMainWindow):
         self.setWindowTitle(f"BlueFalcon DNS Benchmark Pro v{APP_VERSION}")
         self.setMinimumSize(1050, 700)
         
+        icon_path = AppUtils.get_resource_path("icon.ico")
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+        
         if not AppUtils.is_admin():
             logger.warning("Application launched without Administrator privileges. Some WMI queries may fail.")
         if not AppUtils.check_internet_connection():
@@ -718,7 +722,6 @@ class ModernDNSApp(QMainWindow):
             
         processed = 0
         
-        # Pausing graphical updates during batched injection completely mitigates UI stutter
         self.table.setUpdatesEnabled(False)
         
         while not self.result_queue.empty() and processed < 150:

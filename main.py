@@ -4,6 +4,7 @@
 import sys
 import ctypes
 import platform
+from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QIcon
 
