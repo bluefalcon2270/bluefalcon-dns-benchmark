@@ -8,8 +8,8 @@ import re
 import webbrowser
 import ctypes
 import tkinter as tk
+from tkinter import ttk, messagebox, filedialog, simpledialog
 import customtkinter as ctk
-from tkinter import messagebox, filedialog, simpledialog
 from datetime import datetime
 import pandas as pd
 
@@ -18,7 +18,7 @@ from core import NetworkUtils, ConfigManager
 # ==========================================
 # Application Configuration & Constants
 # ==========================================
-APP_VERSION = "40.0"
+APP_VERSION = "41.0"
 
 # Material Design 3 (Google) Dark Theme Colors
 C_BG = "#131314"            # Deep App Background
@@ -39,14 +39,13 @@ ctk.set_default_color_theme("blue")
 def get_resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
     except AttributeError:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
 # ==========================================
-# UI Components
+# Virtual Grid Table (Solves GDI Memory Crash)
 # ==========================================
 class ScrollableTable(ctk.CTkFrame):
     def __init__(self, master, **kwargs):
@@ -54,29 +53,33 @@ class ScrollableTable(ctk.CTkFrame):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self.canvas = tk.Canvas(self, bg=C_CARD, highlightthickness=0)
-        self.canvas.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        # Style configuration for ttk.Treeview to match CTk Dark Theme
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("Treeview",
+                        background=C_CARD,
+                        foreground=C_TEXT_MAIN,
+                        fieldbackground=C_CARD,
+                        rowheight=32,
+                        borderwidth=0,
+                        font=("Segoe UI", 11))
+        style.map('Treeview', background=[('selected', C_PRIMARY_BG)])
+        style.configure("Treeview.Heading",
+                        background=C_BG,
+                        foreground=C_TEXT_MAIN,
+                        font=("Segoe UI", 12, "bold"),
+                        borderwidth=0)
+        style.map("Treeview.Heading", background=[('active', C_BORDER)])
 
-        self.v_scroll = ctk.CTkScrollbar(self, orientation="vertical", command=self.canvas.yview)
-        self.v_scroll.grid(row=0, column=1, sticky="ns", pady=10, padx=(0,10))
-        self.h_scroll = ctk.CTkScrollbar(self, orientation="horizontal", command=self.canvas.xview)
-        self.h_scroll.grid(row=1, column=0, sticky="ew", padx=10, pady=(0,10))
+        self.tree = ttk.Treeview(self, show="headings", selectmode="browse")
+        
+        self.vsb = ctk.CTkScrollbar(self, orientation="vertical", command=self.tree.yview)
+        self.hsb = ctk.CTkScrollbar(self, orientation="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=self.vsb.set, xscrollcommand=self.hsb.set)
 
-        self.canvas.configure(yscrollcommand=self.v_scroll.set, xscrollcommand=self.h_scroll.set)
-        self.inner_frame = ctk.CTkFrame(self.canvas, fg_color="transparent")
-        self.canvas_window = self.canvas.create_window((0, 0), window=self.inner_frame, anchor="nw")
-
-        self.inner_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.bind("<Enter>", self._bind_mousewheel)
-        self.canvas.bind("<Leave>", self._unbind_mousewheel)
-
-    def _bind_mousewheel(self, event):
-        self.canvas.bind_all("<MouseWheel>", lambda e: self.canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
-        self.canvas.bind_all("<Shift-MouseWheel>", lambda e: self.canvas.xview_scroll(int(-1*(e.delta/120)), "units"))
-
-    def _unbind_mousewheel(self, event):
-        self.canvas.unbind_all("<MouseWheel>")
-        self.canvas.unbind_all("<Shift-MouseWheel>")
+        self.tree.grid(row=0, column=0, sticky="nsew", padx=(15, 5), pady=(15, 5))
+        self.vsb.grid(row=0, column=1, sticky="ns", padx=(0, 15), pady=(15, 5))
+        self.hsb.grid(row=1, column=0, sticky="ew", padx=(15, 5), pady=(0, 15))
 
 # ==========================================
 # Main Application Window
@@ -98,12 +101,10 @@ class ModernDNSApp(ctk.CTk):
         self.minsize(1000, 650)
         self.configure(fg_color=C_BG)
         
-        # Set Window and Taskbar Icon
         icon_path = get_resource_path("icon.ico")
         if os.path.exists(icon_path):
             self.iconbitmap(icon_path)
 
-        # State Variables
         self.display_mode = "live"
         self.history_results = []
         
@@ -115,7 +116,7 @@ class ModernDNSApp(ctk.CTk):
         self.domains = []
         self.networks = []
         
-        self.ui_cells = {} 
+        self.tree_items = {} 
         self.results_data = {} 
         self.update_queue = queue.Queue()
         
@@ -142,7 +143,6 @@ class ModernDNSApp(ctk.CTk):
         self.process_queue()
 
     def build_ui(self):
-        # Control Card (Unified Top Bar MD3 Style)
         self.control_card = ctk.CTkFrame(self, fg_color=C_CARD, corner_radius=24)
         self.control_card.pack(fill="x", padx=30, pady=(30, 20), ipady=12)
 
@@ -166,12 +166,10 @@ class ModernDNSApp(ctk.CTk):
         self.combo_profile = ctk.CTkComboBox(self.control_card, variable=self.selected_profile_var, values=["Select Profile"], width=140, height=36, fg_color=C_BG, corner_radius=8, border_color=C_BORDER, command=self.on_profile_select)
         self.combo_profile.pack(side="left", padx=(0, 15))
 
-        # Preferences / Gear Button
         self.btn_prefs = ctk.CTkButton(self.control_card, text="⚙️", font=("Segoe UI Emoji", 24), command=self.open_preferences,
                                       fg_color="transparent", text_color=C_TEXT_MAIN, hover_color=C_BORDER, corner_radius=24, width=44, height=44)
         self.btn_prefs.pack(side="right", padx=(5, 20))
 
-        # Sort Button
         self.btn_sort = ctk.CTkButton(self.control_card, text="🔽 Sort", font=("Segoe UI", 13, "bold"), command=self.sort_results,
                                       fg_color="transparent", text_color=C_TEXT_MAIN, border_width=1, border_color=C_BORDER, hover_color=C_BG, corner_radius=24, width=80, height=36)
         self.btn_sort.pack(side="right", padx=5)
@@ -179,9 +177,10 @@ class ModernDNSApp(ctk.CTk):
         self.lbl_progress_text = ctk.CTkLabel(self.control_card, text="", text_color=C_PRIMARY, font=("Segoe UI", 13, "bold"))
         self.lbl_progress_text.pack(side="right", padx=10)
 
-        # Table Area
+        # High-Performance Virtual Table Area
         self.table_scroll = ScrollableTable(self)
         self.table_scroll.pack(padx=30, pady=(0, 30), fill="both", expand=True)
+        self.table_scroll.tree.bind("<Double-1>", self.on_tree_double_click)
 
     def on_profile_select(self, choice):
         if choice == "Select Profile":
@@ -251,149 +250,96 @@ class ModernDNSApp(ctk.CTk):
 
         return avg_ping_str, str(failures)
 
+    def on_tree_double_click(self, event):
+        region = self.table_scroll.tree.identify("region", event.x, event.y)
+        if region in ("cell", "tree"):
+            iid = self.table_scroll.tree.focus()
+            if iid:
+                vals = self.table_scroll.tree.item(iid, "values")
+                if vals and len(vals) > 1:
+                    ip = str(vals[1]).split()[0]
+                    self.copy_to_clipboard(ip)
+
     def copy_to_clipboard(self, text):
         self.clipboard_clear()
         self.clipboard_append(text)
         self.update()
+        self.lbl_status.configure(text=f"Copied: {text}", text_color=C_SUCCESS)
 
     def build_grid(self):
-        for widget in self.table_scroll.inner_frame.winfo_children():
-            widget.destroy()
-        self.ui_cells.clear()
+        for item in self.table_scroll.tree.get_children():
+            self.table_scroll.tree.delete(item)
+        self.tree_items.clear()
 
         # Build UI for HISTORY Mode
         if self.display_mode == "history":
-            if not getattr(self, "history_results", None):
-                return
-
-            headers = ["#", "DNS Server", "Avg Errors", "Avg Ping (ms)", "Tests Sent"]
-            total_cols = len(headers) * 2 - 1
-
-            for col_idx, text in enumerate(headers):
-                actual_col = col_idx * 2 
-                if col_idx == 0: width = 40
-                elif col_idx == 1: width = 220
-                elif col_idx == 2: width = 120
-                elif col_idx == 3: width = 120
-                else: width = 120
-                
-                lbl = ctk.CTkLabel(self.table_scroll.inner_frame, text=text, font=("Segoe UI", 14, "bold"), 
-                                   fg_color=C_CARD, text_color=C_TEXT_MAIN, corner_radius=6, width=width, height=32)
-                lbl.grid(row=0, column=actual_col, padx=4, pady=(15, 10), sticky="ew")
-
-                if col_idx < len(headers) - 1:
-                    ctk.CTkFrame(self.table_scroll.inner_frame, width=2, fg_color=C_BG).grid(row=0, column=actual_col+1, rowspan=len(self.history_results)*2+1, sticky="ns", pady=10)
+            if not getattr(self, "history_results", None): return
+            
+            columns = ["id", "server", "errors", "ping", "tests"]
+            self.table_scroll.tree.configure(columns=columns)
+            
+            self.table_scroll.tree.heading("id", text="#")
+            self.table_scroll.tree.column("id", width=50, anchor="center")
+            
+            self.table_scroll.tree.heading("server", text="DNS Server")
+            self.table_scroll.tree.column("server", width=250, anchor="w")
+            
+            self.table_scroll.tree.heading("errors", text="Avg Errors")
+            self.table_scroll.tree.column("errors", width=120, anchor="center")
+            
+            self.table_scroll.tree.heading("ping", text="Avg Ping (ms)")
+            self.table_scroll.tree.column("ping", width=120, anchor="center")
+            
+            self.table_scroll.tree.heading("tests", text="Tests Sent")
+            self.table_scroll.tree.column("tests", width=120, anchor="center")
 
             for row_index, row_data in enumerate(self.history_results):
-                grid_row = (row_index * 2) + 1
-                
-                ctk.CTkLabel(self.table_scroll.inner_frame, text=str(row_index + 1), font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED).grid(row=grid_row, column=0, padx=4, pady=8)
-
-                srv_frame = ctk.CTkFrame(self.table_scroll.inner_frame, fg_color="transparent", cursor="hand2")
-                srv_frame.grid(row=grid_row, column=2, padx=10, pady=8, sticky="w")
-                srv_frame.bind("<Double-Button-1>", lambda e, ip=row_data['DNS_IP']: self.copy_to_clipboard(ip))
-                
-                lbl_ip = ctk.CTkLabel(srv_frame, text=row_data['DNS_IP'], font=("Segoe UI", 14, "bold"), text_color=C_PRIMARY)
-                lbl_ip.pack(side="left")
-                lbl_ip.bind("<Double-Button-1>", lambda e, ip=row_data['DNS_IP']: self.copy_to_clipboard(ip))
-
-                if row_data['DNS_Name']:
-                    ctk.CTkLabel(srv_frame, text=f" {row_data['DNS_Name']}", font=("Segoe UI", 12), text_color=C_TEXT_MUTED).pack(side="left", padx=(4,0))
-
-                avg_err = round(row_data['Avg_Errors'], 2)
-                err_color = C_SUCCESS if avg_err < 1 else (C_WARNING if avg_err <= 3 else C_ERROR)
-                ctk.CTkLabel(self.table_scroll.inner_frame, text=str(avg_err), font=("Segoe UI", 15, "bold"), text_color=err_color).grid(row=grid_row, column=4)
-
+                srv_name = f" {row_data['DNS_Name']}" if row_data['DNS_Name'] else ""
+                srv_text = f"{row_data['DNS_IP']}{srv_name}"
                 ping_val = row_data['Avg_Ping']
                 ping_str = f"{round(ping_val)} ms" if ping_val != -1 else "Failed"
-                ctk.CTkLabel(self.table_scroll.inner_frame, text=ping_str, font=("Segoe UI", 14, "bold"), text_color=C_TEXT_MAIN).grid(row=grid_row, column=6)
-
-                ctk.CTkLabel(self.table_scroll.inner_frame, text=str(int(row_data['Test_Count'])), font=("Segoe UI", 14, "bold"), text_color=C_TEXT_MUTED).grid(row=grid_row, column=8)
-
-                ctk.CTkFrame(self.table_scroll.inner_frame, height=1, fg_color=C_BG).grid(row=grid_row + 1, column=0, columnspan=total_cols, sticky="ew", padx=10)
-
+                
+                values = [row_index + 1, srv_text, round(row_data['Avg_Errors'], 2), ping_str, int(row_data['Test_Count'])]
+                self.table_scroll.tree.insert("", "end", values=values)
             return
 
         # Build UI for LIVE Mode
         if not self.active_profiles:
-            ctk.CTkLabel(self.table_scroll.inner_frame, text="No Configuration Loaded. Use the Profile dropdown to select files.", 
-                         font=("Segoe UI", 16, "bold"), text_color=C_WARNING).grid(row=0, column=0, padx=30, pady=30)
+            self.table_scroll.tree.configure(columns=["msg"])
+            self.table_scroll.tree.heading("msg", text="No Configuration Loaded. Use the Profile dropdown to select files.")
+            self.table_scroll.tree.column("msg", width=800, anchor="w")
             return
 
         if not self.dns_list or not self.domains:
-            ctk.CTkLabel(self.table_scroll.inner_frame, text="Selected profile(s) are empty. Please add data via Settings.", 
-                         font=("Segoe UI", 16), text_color=C_TEXT_MUTED).grid(row=0, column=0, padx=30, pady=30)
+            self.table_scroll.tree.configure(columns=["msg"])
+            self.table_scroll.tree.heading("msg", text="Selected profile(s) are empty. Please add data via Settings.")
+            self.table_scroll.tree.column("msg", width=800, anchor="w")
             return
 
         display_domains = [ConfigManager.format_domain(d) for d in self.domains]
-        headers = ["#", "DNS Server", "Errors", "Avg Ping"] + display_domains
-        total_cols = len(headers) * 2 - 1
+        columns = ["id", "server", "errors", "ping"] + self.domains
+        self.table_scroll.tree.configure(columns=columns)
 
-        for col_idx, text in enumerate(headers):
-            actual_col = col_idx * 2 
-            
-            if col_idx == 0: width = 40
-            elif col_idx == 1: width = 160
-            elif col_idx == 2: width = 60
-            elif col_idx == 3: width = 90
-            else: width = 110
-            
-            lbl = ctk.CTkLabel(self.table_scroll.inner_frame, text=text, font=("Segoe UI", 13, "bold"), 
-                               fg_color=C_CARD, text_color=C_TEXT_MAIN, corner_radius=6, width=width, height=32)
-            lbl.grid(row=0, column=actual_col, padx=4, pady=(15, 10), sticky="ew")
+        self.table_scroll.tree.heading("id", text="#"); self.table_scroll.tree.column("id", width=50, anchor="center")
+        self.table_scroll.tree.heading("server", text="DNS Server"); self.table_scroll.tree.column("server", width=220, anchor="w")
+        self.table_scroll.tree.heading("errors", text="Errors"); self.table_scroll.tree.column("errors", width=80, anchor="center")
+        self.table_scroll.tree.heading("ping", text="Avg Ping"); self.table_scroll.tree.column("ping", width=100, anchor="center")
 
-            if col_idx < len(headers) - 1:
-                ctk.CTkFrame(self.table_scroll.inner_frame, width=2, fg_color=C_BG).grid(row=0, column=actual_col+1, rowspan=len(self.dns_list)*2+1, sticky="ns", pady=10)
+        for i, d in enumerate(self.domains):
+            self.table_scroll.tree.heading(d, text=display_domains[i])
+            self.table_scroll.tree.column(d, width=120, anchor="center")
 
         for row_index, info in enumerate(self.dns_list):
-            grid_row = (row_index * 2) + 1
             row_id = info["row_id"]
-            self.ui_cells[row_id] = {}
+            srv_text = info["ip"]
+            if info["is_system"]: srv_text += " [System]"
+            if info["name"]: srv_text += f" {info['name']}"
 
-            lbl_row_num = ctk.CTkLabel(self.table_scroll.inner_frame, text=str(row_index + 1), font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED)
-            lbl_row_num.grid(row=grid_row, column=0, padx=4, pady=8)
-            self.ui_cells[row_id]["_row_num"] = lbl_row_num
-
-            srv_frame = ctk.CTkFrame(self.table_scroll.inner_frame, fg_color="transparent", cursor="hand2")
-            srv_frame.grid(row=grid_row, column=2, padx=10, pady=8, sticky="w")
-            srv_frame.bind("<Double-Button-1>", lambda e, ip=info["ip"]: self.copy_to_clipboard(ip))
-            self.ui_cells[row_id]["_srv_frame"] = srv_frame
+            avg, err_text = self.calculate_metrics(row_id)
+            values = [row_index + 1, srv_text, err_text, avg] + ["-"] * len(self.domains)
             
-            lbl_ip = ctk.CTkLabel(srv_frame, text=info["ip"], font=("Segoe UI", 14, "bold"), text_color=C_PRIMARY)
-            lbl_ip.pack(side="left")
-            lbl_ip.bind("<Double-Button-1>", lambda e, ip=info["ip"]: self.copy_to_clipboard(ip))
-
-            if info["is_system"]:
-                ctk.CTkLabel(srv_frame, text=" [System]", font=("Segoe UI", 11, "bold"), text_color=C_WARNING).pack(side="left", padx=(4,0))
-            if info["name"]:
-                ctk.CTkLabel(srv_frame, text=f" {info['name']}", font=("Segoe UI", 12), text_color=C_TEXT_MUTED).pack(side="left", padx=(4,0))
-
-            avg_text, err_text = self.calculate_metrics(row_id)
-            
-            grade_color = C_TEXT_MUTED
-            if err_text != "-":
-                err_val = int(err_text)
-                if err_val == 0: grade_color = C_SUCCESS
-                elif err_val <= 2: grade_color = C_WARNING
-                else: grade_color = C_ERROR
-
-            lbl_grade = ctk.CTkLabel(self.table_scroll.inner_frame, text=err_text, font=("Segoe UI", 15, "bold"), text_color=grade_color)
-            lbl_grade.grid(row=grid_row, column=4)
-            self.ui_cells[row_id]["_grade"] = lbl_grade
-
-            lbl_avg = ctk.CTkLabel(self.table_scroll.inner_frame, text=avg_text, font=("Segoe UI", 14, "bold"), text_color=C_TEXT_MAIN)
-            lbl_avg.grid(row=grid_row, column=6)
-            self.ui_cells[row_id]["_avg"] = lbl_avg
-
-            for col_idx, domain in enumerate(self.domains, start=4):
-                actual_col = col_idx * 2
-                lbl_cell = ctk.CTkLabel(self.table_scroll.inner_frame, text="-", text_color=C_BORDER, font=("Segoe UI", 14, "bold"), width=110)
-                lbl_cell.grid(row=grid_row, column=actual_col, padx=4, pady=8)
-                self.ui_cells[row_id][domain] = lbl_cell
-
-            separator = ctk.CTkFrame(self.table_scroll.inner_frame, height=1, fg_color=C_BG)
-            separator.grid(row=grid_row + 1, column=0, columnspan=total_cols, sticky="ew", padx=10)
-            self.ui_cells[row_id]["_separator"] = separator
+            iid = self.table_scroll.tree.insert("", "end", iid=row_id, values=values)
+            self.tree_items[row_id] = iid
 
     def toggle_scan(self):
         if self.display_mode == "history":
@@ -423,11 +369,15 @@ class ModernDNSApp(ctk.CTk):
         self.btn_start.configure(text="🛑 Stop Scan", fg_color="#8C1D18", text_color=C_TEXT_MAIN, hover_color="#601410")
         self.lbl_status.configure(text="Benchmarking...", text_color=C_PRIMARY)
         
-        for row_id in self.ui_cells:
-            if "_grade" in self.ui_cells[row_id]: self.ui_cells[row_id]["_grade"].configure(text="-", text_color=C_TEXT_MUTED)
-            if "_avg" in self.ui_cells[row_id]: self.ui_cells[row_id]["_avg"].configure(text="-")
-            for dom in self.domains:
-                if dom in self.ui_cells[row_id]: self.ui_cells[row_id][dom].configure(text="...", text_color=C_TEXT_MUTED)
+        # Reset table UI
+        for row_id in self.tree_items:
+            iid = self.tree_items[row_id]
+            vals = list(self.table_scroll.tree.item(iid, "values"))
+            vals[2] = "-"
+            vals[3] = "-"
+            for i in range(4, len(vals)):
+                vals[i] = "..."
+            self.table_scroll.tree.item(iid, values=vals)
 
         threading.Thread(target=self._scan_engine, daemon=True).start()
 
@@ -453,7 +403,8 @@ class ModernDNSApp(ctk.CTk):
     def process_queue(self):
         try:
             processed_tasks = 0
-            while not self.update_queue.empty() and processed_tasks < 100:
+            # Increase processing throttle to handle large loads faster
+            while not self.update_queue.empty() and processed_tasks < 500:
                 try:
                     row_id, domain, success, text, time_val = self.update_queue.get_nowait()
                     
@@ -471,14 +422,14 @@ class ModernDNSApp(ctk.CTk):
                             self._save_to_history()
                             self.lbl_status.configure(text="Scan Complete", text_color=C_SUCCESS)
                         
-                        for r_id in self.ui_cells:
+                        # Final metric update loop
+                        for r_id in self.tree_items:
+                            iid = self.tree_items[r_id]
+                            current_vals = list(self.table_scroll.tree.item(iid, "values"))
                             avg, err_text = self.calculate_metrics(r_id)
-                            if "_grade" in self.ui_cells[r_id] and err_text != "-": 
-                                err_val = int(err_text)
-                                c = C_SUCCESS if err_val == 0 else (C_WARNING if err_val <= 2 else C_ERROR)
-                                self.ui_cells[r_id]["_grade"].configure(text=err_text, text_color=c)
-                            if "_avg" in self.ui_cells[r_id]: 
-                                self.ui_cells[r_id]["_avg"].configure(text=avg)
+                            current_vals[2] = err_text
+                            current_vals[3] = avg
+                            self.table_scroll.tree.item(iid, values=current_vals)
                     else:
                         self.completed_tasks += 1
                         if self.total_tasks > 0:
@@ -487,11 +438,17 @@ class ModernDNSApp(ctk.CTk):
 
                         self.results_data[row_id][domain] = {"success": success, "text": text, "time": time_val}
 
-                        if row_id in self.ui_cells and domain in self.ui_cells[row_id]:
-                            lbl = self.ui_cells[row_id][domain]
-                            if success: lbl.configure(text=text, text_color=C_SUCCESS)
-                            else: lbl.configure(text=text, text_color=C_ERROR, font=("Segoe UI", 12))
-                            
+                        # Update tree cell immediately
+                        if row_id in self.tree_items:
+                            iid = self.tree_items[row_id]
+                            current_vals = list(self.table_scroll.tree.item(iid, "values"))
+                            try:
+                                dom_idx = 4 + self.domains.index(domain)
+                                current_vals[dom_idx] = text if success else f"❌ {text}"
+                                self.table_scroll.tree.item(iid, values=current_vals)
+                            except ValueError:
+                                pass
+
                 except queue.Empty:
                     break
                 except Exception as e:
@@ -499,7 +456,6 @@ class ModernDNSApp(ctk.CTk):
                 
                 processed_tasks += 1
         finally:
-            # Ensures the loop ALWAYS schedules itself again regardless of errors
             self.after(50, self.process_queue)
 
     def _save_to_history(self):
@@ -552,51 +508,28 @@ class ModernDNSApp(ctk.CTk):
                 avg_ping = (total_time / success_count) if success_count > 0 else float('inf')
                 return (fail_count, avg_ping)
 
+            # Rebuild grid natively sorts items via dictionary rebuild
             self.dns_list.sort(key=get_sort_key)
             self.is_sorted = True
+            self.build_grid()
             
-            # Smart Re-Gridding instead of Destroying (Fixes Tkinter freeze/hard lock issue)
-            for row_index, info in enumerate(self.dns_list):
-                grid_row = (row_index * 2) + 1
-                row_id = info["row_id"]
-                
-                if row_id in self.ui_cells:
-                    if "_row_num" in self.ui_cells[row_id]:
-                        self.ui_cells[row_id]["_row_num"].grid(row=grid_row, column=0)
-                        self.ui_cells[row_id]["_row_num"].configure(text=str(row_index + 1))
-                        
-                    if "_srv_frame" in self.ui_cells[row_id]:
-                        self.ui_cells[row_id]["_srv_frame"].grid(row=grid_row, column=2)
-                        
-                    if "_grade" in self.ui_cells[row_id]:
-                        self.ui_cells[row_id]["_grade"].grid(row=grid_row, column=4)
-                        
-                    if "_avg" in self.ui_cells[row_id]:
-                        self.ui_cells[row_id]["_avg"].grid(row=grid_row, column=6)
-                        
-                    for col_idx, domain in enumerate(self.domains, start=4):
-                        actual_col = col_idx * 2
-                        if domain in self.ui_cells[row_id]:
-                            self.ui_cells[row_id][domain].grid(row=grid_row, column=actual_col)
-                            
-                    if "_separator" in self.ui_cells[row_id]:
-                        self.ui_cells[row_id]["_separator"].grid(row=grid_row + 1, column=0)
-            
-            # Recalculate metrics for UI update
+            # Repopulate virtual tree results
             for row_id, dom_data in self.results_data.items():
-                if row_id in self.ui_cells:
+                if row_id in self.tree_items:
+                    iid = self.tree_items[row_id]
+                    current_vals = list(self.table_scroll.tree.item(iid, "values"))
+                    
                     avg, err_text = self.calculate_metrics(row_id)
-                    if err_text != "-":
-                        err_val = int(err_text)
-                        c = C_SUCCESS if err_val == 0 else (C_WARNING if err_val <= 2 else C_ERROR)
-                        self.ui_cells[row_id]["_grade"].configure(text=err_text, text_color=c)
-                    self.ui_cells[row_id]["_avg"].configure(text=avg)
+                    current_vals[2] = err_text
+                    current_vals[3] = avg
                     
                     for dom, res in dom_data.items():
-                        if dom in self.ui_cells[row_id]:
-                            lbl = self.ui_cells[row_id][dom]
-                            if res["success"]: lbl.configure(text=res["text"], text_color=C_SUCCESS)
-                            elif res.get("text"): lbl.configure(text=res["text"], text_color=C_ERROR, font=("Segoe UI", 12))
+                        try:
+                            dom_idx = 4 + self.domains.index(dom)
+                            current_vals[dom_idx] = res["text"] if res["success"] else f"❌ {res.get('text', 'Err')}"
+                        except Exception: pass
+                        
+                    self.table_scroll.tree.item(iid, values=current_vals)
 
     def get_best_successful_dns(self):
         if not self.results_data: return []
