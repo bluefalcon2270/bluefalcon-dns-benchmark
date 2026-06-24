@@ -1,10 +1,12 @@
 import os
+import sys
 import threading
 import queue
 import concurrent.futures
 import csv
 import re
 import webbrowser
+import ctypes
 import tkinter as tk
 import customtkinter as ctk
 from tkinter import messagebox, filedialog, simpledialog
@@ -16,7 +18,7 @@ from core import NetworkUtils, ConfigManager
 # ==========================================
 # Application Configuration & Constants
 # ==========================================
-APP_VERSION = "37.0"
+APP_VERSION = "39.0"
 
 # Material Design 3 (Google) Dark Theme Colors
 C_BG = "#131314"            # Deep App Background
@@ -33,6 +35,15 @@ C_BORDER = "#444746"        # MD3 Outline/Border
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
+
+def get_resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 # ==========================================
 # UI Components
@@ -73,11 +84,24 @@ class ScrollableTable(ctk.CTkFrame):
 class ModernDNSApp(ctk.CTk):
     def __init__(self):
         super().__init__()
+        
+        # Windows Taskbar Icon Fix (AppUserModelID)
+        if sys.platform.startswith('win'):
+            try:
+                myappid = f'bluefalcon.dnsbenchmarkpro.gui.{APP_VERSION}'
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+            except Exception:
+                pass
 
         self.title(f"DNS Benchmark Pro v{APP_VERSION}")
         self.geometry("1280x850")
         self.minsize(1000, 650)
         self.configure(fg_color=C_BG)
+        
+        # Set Window and Taskbar Icon
+        icon_path = get_resource_path("icon.ico")
+        if os.path.exists(icon_path):
+            self.iconbitmap(icon_path)
 
         # State Variables
         self.display_mode = "live"
@@ -105,15 +129,14 @@ class ModernDNSApp(ctk.CTk):
         self.current_workers = 1000
         
         self.selected_network_var = tk.StringVar(value="Default")
-        self.selected_profile_var = tk.StringVar(value="Default")
+        self.selected_profile_var = tk.StringVar(value="Select Profile")
 
         self.build_ui()
         
         profiles = ConfigManager.get_available_profiles()
         if profiles:
-            self.combo_profile.configure(values=profiles)
-            self.combo_profile.set(profiles[0])
-            self.load_selected_profiles([profiles[0]])
+            self.combo_profile.configure(values=["Select Profile"] + profiles)
+            self.combo_profile.set("Select Profile")
 
         self.build_grid()
         self.process_queue()
@@ -132,7 +155,7 @@ class ModernDNSApp(ctk.CTk):
         self.progress_bar.pack(side="left", padx=(0, 10))
         self.progress_bar.set(0)
 
-        self.lbl_status = ctk.CTkLabel(self.control_card, text="Waiting for profile load...", text_color=C_WARNING, font=("Segoe UI", 13, "bold"))
+        self.lbl_status = ctk.CTkLabel(self.control_card, text="No Configuration Loaded", text_color=C_WARNING, font=("Segoe UI", 13, "bold"))
         self.lbl_status.pack(side="left", padx=(0, 15))
         
         ctk.CTkLabel(self.control_card, text="Network:", font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED).pack(side="left", padx=(5, 5))
@@ -140,7 +163,7 @@ class ModernDNSApp(ctk.CTk):
         self.combo_network.pack(side="left", padx=(0, 15))
 
         ctk.CTkLabel(self.control_card, text="Profile:", font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED).pack(side="left", padx=(5, 5))
-        self.combo_profile = ctk.CTkComboBox(self.control_card, variable=self.selected_profile_var, values=["Default"], width=120, height=36, fg_color=C_BG, corner_radius=8, border_color=C_BORDER, command=lambda e: self.load_selected_profiles([self.selected_profile_var.get()]))
+        self.combo_profile = ctk.CTkComboBox(self.control_card, variable=self.selected_profile_var, values=["Select Profile"], width=140, height=36, fg_color=C_BG, corner_radius=8, border_color=C_BORDER, command=self.on_profile_select)
         self.combo_profile.pack(side="left", padx=(0, 15))
 
         # Preferences / Gear Button
@@ -160,13 +183,19 @@ class ModernDNSApp(ctk.CTk):
         self.table_scroll = ScrollableTable(self)
         self.table_scroll.pack(padx=30, pady=(0, 30), fill="both", expand=True)
 
+    def on_profile_select(self, choice):
+        if choice == "Select Profile":
+            self.load_selected_profiles([])
+        else:
+            self.load_selected_profiles([choice])
+
     def load_selected_profiles(self, filenames):
         self.display_mode = "live"
         self.is_sorted = False
         self.active_profiles = filenames
         if not filenames:
             self.config_data = {"dns_list": [], "domain_list": [], "network_list": []}
-            self.lbl_status.configure(text="No profile loaded", text_color=C_WARNING)
+            self.lbl_status.configure(text="No Configuration Loaded", text_color=C_WARNING)
         else:
             self.config_data = ConfigManager.load_multiple_profiles(filenames)
             names = [f.replace("config_", "").replace(".txt", "") for f in filenames]
@@ -586,6 +615,10 @@ class ModernDNSApp(ctk.CTk):
         win.geometry("600x700")
         win.transient(self)
         win.grab_set()
+        
+        icon_path = get_resource_path("icon.ico")
+        if os.path.exists(icon_path):
+            win.iconbitmap(icon_path)
 
         tabview = ctk.CTkTabview(win, fg_color=C_CARD, corner_radius=24, segmented_button_fg_color=C_BG, segmented_button_selected_color=C_PRIMARY_BG, segmented_button_selected_hover_color="#0842A0", text_color=C_TEXT_MAIN)
         tabview.pack(fill="both", expand=True, padx=20, pady=20)
@@ -659,6 +692,10 @@ class ModernDNSApp(ctk.CTk):
         win.geometry("500x600")
         win.transient(self)
         win.grab_set()
+        
+        icon_path = get_resource_path("icon.ico")
+        if os.path.exists(icon_path):
+            win.iconbitmap(icon_path)
 
         file_data = ConfigManager.load_single_profile(filename)
 
@@ -716,9 +753,13 @@ class ModernDNSApp(ctk.CTk):
         def apply_load():
             selected = [p for p, var in checkbox_vars.items() if var.get()]
             self.load_selected_profiles(selected)
+            all_profiles = ConfigManager.get_available_profiles()
+            self.combo_profile.configure(values=["Select Profile"] + all_profiles)
+            
             if selected:
-                self.combo_profile.configure(values=ConfigManager.get_available_profiles())
                 self.combo_profile.set(selected[0])
+            else:
+                self.combo_profile.set("Select Profile")
             win.destroy()
 
         def save_best_profile():
@@ -738,7 +779,10 @@ class ModernDNSApp(ctk.CTk):
             data_to_save = {"dns_list": best_dns_lines, "domain_list": self.domains, "network_list": self.networks}
             ConfigManager.save_single_profile(new_filename, data_to_save)
             messagebox.showinfo("Success", f"Saved {len(best_dns_lines)} working DNS servers to {new_filename}", parent=win)
-            self.combo_profile.configure(values=ConfigManager.get_available_profiles())
+            
+            all_profiles = ConfigManager.get_available_profiles()
+            self.combo_profile.configure(values=["Select Profile"] + all_profiles)
+            
             win.destroy()
             self.open_preferences()
 
