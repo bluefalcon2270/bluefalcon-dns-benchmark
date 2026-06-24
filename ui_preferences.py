@@ -1,4 +1,4 @@
-# Version 43.0 | File: ui_preferences.py | Preferences and Settings Modal
+# Version 44.0 | File: ui_preferences.py | Preferences and Settings Modal
 import os
 import re
 import webbrowser
@@ -118,7 +118,6 @@ class PreferencesBuilder:
             
             if filename in app.active_profiles:
                 app.load_selected_profiles(app.active_profiles)
-                
             win.destroy()
 
         ctk.CTkButton(win, text="Save File", font=("Segoe UI", 14, "bold"), command=save, fg_color=C_SUCCESS, text_color=C_BG, hover_color="#6BBA80", corner_radius=24, height=40).pack(pady=20)

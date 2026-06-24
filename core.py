@@ -1,4 +1,4 @@
-# Version 43.0 | File: core.py | Network and Configuration Management
+# Version 44.0 | File: core.py | Network and Configuration Management
 import os
 import time
 import socket

@@ -1,4 +1,4 @@
-# Version 43.0 | File: ui_shared.py | Shared UI Elements, Themes, and Engines
+# Version 44.0 | File: ui_shared.py | Shared UI Elements, Themes, and Engines
 import os
 import sys
 import csv
@@ -9,43 +9,27 @@ import customtkinter as ctk
 from datetime import datetime
 from core import NetworkUtils, ConfigManager
 
-# ==========================================
-# Application Configuration & Constants
-# ==========================================
-APP_VERSION = "43.0"
+APP_VERSION = "44.0"
 
-# Material Design 3 (Google) Dark Theme Colors
-C_BG = "#131314"            # Deep App Background
-C_CARD = "#1E1F20"          # Surface/Card Color
-C_PRIMARY = "#A8C7FA"       # MD3 Light Blue Text
-C_PRIMARY_BG = "#0A56D1"    # MD3 Dark Blue Button
-C_SUCCESS = "#81C995"       # MD3 Green
-C_ERROR = "#F28B82"         # MD3 Red
-C_WARNING = "#FDE293"       # MD3 Yellow
-C_PRO = "#FFD700"           # Gold/Pro
-C_TEXT_MAIN = "#E2E2E2"     # Main Text
-C_TEXT_MUTED = "#C4C7C5"    # Muted/Secondary Text
-C_BORDER = "#444746"        # MD3 Outline/Border
+C_BG = "#131314"
+C_CARD = "#1E1F20"
+C_PRIMARY = "#A8C7FA"
+C_PRIMARY_BG = "#0A56D1"
+C_SUCCESS = "#81C995"
+C_ERROR = "#F28B82"
+C_WARNING = "#FDE293"
+C_PRO = "#FFD700"
+C_TEXT_MAIN = "#E2E2E2"
+C_TEXT_MUTED = "#C4C7C5"
+C_BORDER = "#444746"
 
 def get_resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
         base_path = sys._MEIPASS
     except AttributeError:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
-def get_status_icon(ping_ms, is_error=False):
-    """ Returns the appropriate high-performance Unicode emoji status indicator """
-    if is_error: return "🔴"
-    if ping_ms == -1: return "🔴"
-    if ping_ms < 100: return "🟢"
-    if ping_ms < 200: return "🟩"
-    return "🟨"
-
-# ==========================================
-# Custom Widgets
-# ==========================================
 class ScrollableTable(ctk.CTkFrame):
     def __init__(self, master, **kwargs):
         super().__init__(master, fg_color=C_CARD, corner_radius=24, **kwargs)
@@ -54,23 +38,12 @@ class ScrollableTable(ctk.CTkFrame):
 
         style = ttk.Style()
         style.theme_use("default")
-        style.configure("Treeview",
-                        background=C_CARD,
-                        foreground=C_TEXT_MAIN,
-                        fieldbackground=C_CARD,
-                        rowheight=32,
-                        borderwidth=0,
-                        font=("Segoe UI", 11))
+        style.configure("Treeview", background=C_CARD, foreground=C_TEXT_MAIN, fieldbackground=C_CARD, rowheight=32, borderwidth=0, font=("Segoe UI", 11))
         style.map('Treeview', background=[('selected', C_PRIMARY_BG)])
-        style.configure("Treeview.Heading",
-                        background=C_BG,
-                        foreground=C_TEXT_MAIN,
-                        font=("Segoe UI", 12, "bold"),
-                        borderwidth=0)
+        style.configure("Treeview.Heading", background=C_BG, foreground=C_TEXT_MAIN, font=("Segoe UI", 12, "bold"), borderwidth=0)
         style.map("Treeview.Heading", background=[('active', C_BORDER)])
 
         self.tree = ttk.Treeview(self, show="headings", selectmode="browse")
-        
         self.vsb = ctk.CTkScrollbar(self, orientation="vertical", command=self.tree.yview)
         self.hsb = ctk.CTkScrollbar(self, orientation="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=self.vsb.set, xscrollcommand=self.hsb.set)
@@ -79,9 +52,6 @@ class ScrollableTable(ctk.CTkFrame):
         self.vsb.grid(row=0, column=1, sticky="ns", padx=(0, 15), pady=(15, 5))
         self.hsb.grid(row=1, column=0, sticky="ew", padx=(15, 5), pady=(0, 15))
 
-# ==========================================
-# Engines and Handlers
-# ==========================================
 class ScannerEngine:
     @staticmethod
     def run_scan(dns_list, domains, timeout, workers, update_queue, stop_event):
@@ -119,7 +89,6 @@ class DataManager:
 
         failures = total_domains - successes
         avg_ping_str = "Failed" if successes == 0 else f"{round(total_time / successes)} ms"
-
         return avg_ping_str, str(failures)
 
     @staticmethod
@@ -137,13 +106,8 @@ class DataManager:
                 for info in dns_list:
                     r_id = info["row_id"]
                     avg_ping_str, err_text = DataManager.calculate_metrics(results_data, r_id, domains)
-                    
-                    ping_val = -1
-                    if "ms" in avg_ping_str:
-                        ping_val = int(avg_ping_str.replace(" ms", ""))
-                    
+                    ping_val = -1 if "Failed" in avg_ping_str or avg_ping_str == "-" else int(avg_ping_str.replace(" ms", ""))
                     err_val = int(err_text) if err_text != "-" else len(domains)
-                    
                     writer.writerow([timestamp, network, info["ip"], info["name"], err_val, ping_val])
         except Exception as e:
             print(f"Failed to save history: {e}")
@@ -153,7 +117,6 @@ class DataManager:
         if display_mode == "history":
             messagebox.showwarning("Warning", "Exporting is available for Live scans only. You can find all history data directly in 'benchmark_history.csv'.")
             return
-
         if not results_data or is_scanning:
             messagebox.showwarning("Warning", "Complete a scan before exporting.")
             return
@@ -172,11 +135,9 @@ class DataManager:
                     row_id = info["row_id"]
                     avg_ping, err_text = DataManager.calculate_metrics(results_data, row_id, domains)
                     row_data = [info["ip"], info["name"], "Yes" if info["is_system"] else "No", err_text, avg_ping]
-                    
                     for dom in domains:
                         res = results_data.get(row_id, {}).get(dom, {})
                         row_data.append(res.get("text", "-") if res.get("success") else res.get("text", "Error"))
-                        
                     writer.writerow(row_data)
             messagebox.showinfo("Success", f"Data exported to:\n{fp}")
         except Exception as e:
@@ -185,15 +146,10 @@ class DataManager:
     @staticmethod
     def get_best_successful_dns(dns_list, domains, results_data):
         if not results_data: return []
-            
         valid_dns = []
         for info in dns_list:
             row_id = info["row_id"]
             row_res = results_data.get(row_id, {})
-            
-            success_count = sum(1 for d in domains if row_res.get(d, {}).get("success"))
-            if success_count > 0:
-                original_line = f"{info['ip']} {info['name']}".strip()
-                valid_dns.append(original_line)
-                
+            if sum(1 for d in domains if row_res.get(d, {}).get("success")) > 0:
+                valid_dns.append(f"{info['ip']} {info['name']}".strip())
         return valid_dns
