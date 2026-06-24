@@ -1,4 +1,4 @@
-# Version 45.0 | File: ui_views.py | Sidebar View Content Builders
+# Version 46.0 | File: ui_views.py | Sidebar View Content Builders
 import os
 import re
 import webbrowser
@@ -54,7 +54,7 @@ class ViewBuilder:
         default_sel = profiles[0] if profiles else "None"
         
         edit_card = ctk.CTkFrame(frame, fg_color=C_CARD, corner_radius=24)
-        edit_card.pack(fill="x", padx=30, pady=10, ipady=10)
+        edit_card.pack(fill="both", expand=True, padx=30, pady=10)
 
         sel_frame = ctk.CTkFrame(edit_card, fg_color="transparent")
         sel_frame.pack(fill="x", padx=30, pady=15)
@@ -63,16 +63,29 @@ class ViewBuilder:
         combo_profile.set(default_sel)
         combo_profile.pack(side="right")
         
-        def open_editor_wrapper(list_key, title_name):
-            sel_file = combo_profile.get()
-            if not sel_file or sel_file == "None": return
-            ViewBuilder._open_editor(app, sel_file, title_name, list_key)
+        # Integrated Tabbed Workspace
+        tabview = ctk.CTkTabview(edit_card, fg_color=C_BG, corner_radius=16, segmented_button_selected_color=C_PRIMARY_BG, segmented_button_unselected_color=C_BORDER)
+        tabview.pack(fill="both", expand=True, padx=30, pady=(0, 20))
+        
+        tab_dns = tabview.add("📝 DNS Servers")
+        tab_dom = tabview.add("🌐 Domain Targets")
+        tab_net = tabview.add("📡 Networks")
+        
+        editors = {}
+        for tab, key in [(tab_dns, "dns_list"), (tab_dom, "domain_list"), (tab_net, "network_list")]:
+            tb = ctk.CTkTextbox(tab, font=("Consolas", 14), fg_color=C_CARD, border_width=1, border_color=C_BORDER, corner_radius=12)
+            tb.pack(padx=10, pady=10, fill="both", expand=True)
+            editors[key] = tb
 
-        btns_frame = ctk.CTkFrame(edit_card, fg_color="transparent")
-        btns_frame.pack(fill="x", padx=30, pady=5)
-        ctk.CTkButton(btns_frame, text="📝 DNS List", font=("Segoe UI", 14), command=lambda: open_editor_wrapper("dns_list", "DNS Servers"), fg_color="transparent", border_width=1, border_color=C_BORDER, text_color=C_TEXT_MAIN, corner_radius=24, height=40).pack(side="left", expand=True, padx=5, fill="x")
-        ctk.CTkButton(btns_frame, text="🌐 Domains", font=("Segoe UI", 14), command=lambda: open_editor_wrapper("domain_list", "Domain Targets"), fg_color="transparent", border_width=1, border_color=C_BORDER, text_color=C_TEXT_MAIN, corner_radius=24, height=40).pack(side="left", expand=True, padx=5, fill="x")
-        ctk.CTkButton(btns_frame, text="📡 Networks", font=("Segoe UI", 14), command=lambda: open_editor_wrapper("network_list", "Network Targets"), fg_color="transparent", border_width=1, border_color=C_BORDER, text_color=C_TEXT_MAIN, corner_radius=24, height=40).pack(side="left", expand=True, padx=5, fill="x")
+        def load_profile_into_tabs(filename):
+            if not filename or filename == "None": return
+            file_data = ConfigManager.load_single_profile(filename)
+            for key, tb in editors.items():
+                tb.delete("1.0", "end")
+                tb.insert("1.0", "\n".join(file_data.get(key, [])))
+
+        combo_profile.configure(command=load_profile_into_tabs)
+        load_profile_into_tabs(default_sel)
 
         def create_empty():
             name = simpledialog.askstring("New Empty Profile", "Enter profile name:")
@@ -100,37 +113,29 @@ class ViewBuilder:
             messagebox.showinfo("Success", f"Saved {len(best_dns_lines)} working DNS servers to {new_filename}")
             app.refresh_sidebar_views()
 
-        action_card = ctk.CTkFrame(frame, fg_color="transparent")
-        action_card.pack(fill="x", padx=30, pady=20)
-        ctk.CTkButton(action_card, text="+ Create New Profile", font=("Segoe UI", 14, "bold"), height=42, corner_radius=24, command=create_empty, fg_color=C_CARD, text_color=C_TEXT_MAIN, border_width=1, border_color=C_BORDER).pack(side="left", expand=True, padx=(0, 5), fill="x")
-        ctk.CTkButton(action_card, text="🌟 Extract Bests from Scan", font=("Segoe UI", 14, "bold"), height=42, corner_radius=24, command=save_best_profile, fg_color=C_PRIMARY_BG, text_color=C_TEXT_MAIN).pack(side="right", expand=True, padx=(5, 0), fill="x")
-        
-        return frame
-
-    @staticmethod
-    def _open_editor(app, filename, title, key):
-        win = ctk.CTkToplevel(app, fg_color=C_BG)
-        win.title(f"Editing {filename}"); win.geometry("500x600")
-        win.transient(app); win.grab_set()
-        if os.path.exists(get_resource_path("icon.ico")): win.iconbitmap(get_resource_path("icon.ico"))
-        
-        file_data = ConfigManager.load_single_profile(filename)
-        ctk.CTkLabel(win, text=f"Edit {title}", font=("Segoe UI", 18, "bold"), text_color=C_TEXT_MAIN).pack(pady=(20, 5))
-        ctk.CTkLabel(win, text=f"File: {filename}", font=("Segoe UI", 12), text_color=C_TEXT_MUTED).pack(pady=(0, 10))
-        
-        tb = ctk.CTkTextbox(win, font=("Consolas", 14), fg_color=C_CARD, border_width=1, border_color=C_BORDER, corner_radius=16)
-        tb.pack(padx=20, pady=10, fill="both", expand=True)
-        tb.insert("1.0", "\n".join(file_data.get(key, [])))
-
-        def save():
+        def save_current_tab():
+            sel_file = combo_profile.get()
+            if not sel_file or sel_file == "None": return
+            current_tab_name = tabview.get()
+            key_map = {"📝 DNS Servers": "dns_list", "🌐 Domain Targets": "domain_list", "📡 Networks": "network_list"}
+            key = key_map[current_tab_name]
+            
+            file_data = ConfigManager.load_single_profile(sel_file)
+            tb = editors[key]
             lines = [line.strip() for line in tb.get("1.0", "end-1c").split("\n") if line.strip()]
             file_data[key] = lines
-            ConfigManager.save_single_profile(filename, file_data)
-            if filename in app.active_profiles: app.load_selected_profiles(app.active_profiles)
-            win.destroy()
+            ConfigManager.save_single_profile(sel_file, file_data)
+            if sel_file in app.active_profiles: 
+                app.load_selected_profiles(app.active_profiles)
+            messagebox.showinfo("Success", f"Saved changes inside {current_tab_name} to {sel_file}")
 
-        ctk.CTkButton(win, text="Save File", font=("Segoe UI", 14, "bold"), command=save, fg_color=C_SUCCESS, text_color=C_BG, hover_color="#6BBA80", corner_radius=24, height=40).pack(pady=20)
-
+        action_card = ctk.CTkFrame(frame, fg_color="transparent")
+        action_card.pack(fill="x", padx=30, pady=(10, 20))
+        ctk.CTkButton(action_card, text="+ Create New Profile", font=("Segoe UI", 14, "bold"), height=42, corner_radius=24, command=create_empty, fg_color=C_CARD, text_color=C_TEXT_MAIN, border_width=1, border_color=C_BORDER).pack(side="left", expand=True, padx=(0, 5), fill="x")
+        ctk.CTkButton(action_card, text="🌟 Extract Bests from Scan", font=("Segoe UI", 14, "bold"), height=42, corner_radius=24, command=save_best_profile, fg_color=C_PRIMARY_BG, text_color=C_TEXT_MAIN).pack(side="left", expand=True, padx=(5, 5), fill="x")
+        ctk.CTkButton(action_card, text="💾 Save Current Tab Content", font=("Segoe UI", 14, "bold"), height=42, corner_radius=24, command=save_current_tab, fg_color=C_SUCCESS, text_color=C_BG, hover_color="#6BBA80").pack(side="left", expand=True, padx=(5, 0), fill="x")
+        
+        return frame
 
     @staticmethod
     def build_history_view(app, parent_frame):

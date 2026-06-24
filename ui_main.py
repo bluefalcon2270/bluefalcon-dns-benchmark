@@ -1,4 +1,4 @@
-# Version 45.0 | File: ui_main.py | Main Dashboard and Event Loop
+# Version 46.0 | File: ui_main.py | Main Dashboard and Event Loop
 import os
 import sys
 import threading
@@ -112,11 +112,9 @@ class ModernDNSApp(ctk.CTk):
         self.views[name].grid(row=0, column=0, sticky="nsew")
 
     def build_all_views(self):
-        # 1. Live View
         self.views["live"] = ctk.CTkFrame(self.main_container, fg_color="transparent")
         self.build_live_ui(self.views["live"])
 
-        # 2. Secondary Views
         self.views["history"] = ViewBuilder.build_history_view(self, self.main_container)
         self.views["profiles"] = ViewBuilder.build_profiles_view(self, self.main_container)
         self.views["settings"] = ViewBuilder.build_settings_view(self, self.main_container)
@@ -137,17 +135,20 @@ class ModernDNSApp(ctk.CTk):
         left_frame = ctk.CTkFrame(self.control_card, fg_color="transparent")
         left_frame.pack(side="left", padx=20, fill="y")
 
-        self.btn_start = ctk.CTkButton(left_frame, text="🚀 Start Benchmark", font=("Segoe UI", 14, "bold"), command=self.toggle_scan, fg_color=C_PRIMARY_BG, text_color=C_TEXT_MAIN, hover_color="#0842A0", corner_radius=24, width=160, height=40)
+        # UI Jitter Fix: Strict width parameter enforced
+        self.btn_start = ctk.CTkButton(left_frame, text="🚀 Start Benchmark", font=("Segoe UI", 14, "bold"), command=self.toggle_scan, fg_color=C_PRIMARY_BG, text_color=C_TEXT_MAIN, hover_color="#0842A0", corner_radius=24, width=170, height=40)
         self.btn_start.pack(side="left", padx=(5, 10), pady=10)
         
         self.progress_bar = ctk.CTkProgressBar(left_frame, width=200, height=12, progress_color=C_PRIMARY, fg_color=C_BG, corner_radius=12)
         self.progress_bar.pack(side="left", padx=(5, 10))
         self.progress_bar.set(0)
 
-        self.lbl_progress_text = ctk.CTkLabel(left_frame, text="", text_color=C_TEXT_MAIN, font=("Segoe UI", 13, "bold"))
+        # UI Jitter Fix: Enforced explicit box width and west alignment
+        self.lbl_progress_text = ctk.CTkLabel(left_frame, text="", text_color=C_TEXT_MAIN, font=("Segoe UI", 13, "bold"), width=95, anchor="w")
         self.lbl_progress_text.pack(side="left", padx=(0, 15))
 
-        self.lbl_status = ctk.CTkLabel(left_frame, text="No Configuration Loaded", text_color=C_WARNING, font=("Segoe UI", 13, "bold"))
+        # UI Jitter Fix: Strict width blocks domino effect
+        self.lbl_status = ctk.CTkLabel(left_frame, text="No Configuration Loaded", text_color=C_WARNING, font=("Segoe UI", 13, "bold"), width=230, anchor="w")
         self.lbl_status.pack(side="left", padx=(5, 0))
         
         right_frame = ctk.CTkFrame(self.control_card, fg_color="transparent")
@@ -156,11 +157,11 @@ class ModernDNSApp(ctk.CTk):
         self.btn_sort = ctk.CTkButton(right_frame, text="🔽 Sort", font=("Segoe UI", 13, "bold"), command=self.sort_results, fg_color="transparent", text_color=C_TEXT_MAIN, border_width=1, border_color=C_BORDER, hover_color=C_BG, corner_radius=24, width=80, height=36)
         self.btn_sort.pack(side="right", padx=(10, 5), pady=10)
 
-        self.combo_profile = ctk.CTkComboBox(right_frame, variable=self.selected_profile_var, values=["Select Profile"], width=140, height=36, fg_color=C_BG, corner_radius=8, border_color=C_BORDER, justify="center", command=self.on_profile_select)
+        self.combo_profile = ctk.CTkComboBox(right_frame, variable=self.selected_profile_var, values=["Select Profile"], width=150, height=36, fg_color=C_BG, corner_radius=8, border_color=C_BORDER, justify="center", command=self.on_profile_select)
         self.combo_profile.pack(side="right", padx=(5, 10))
         ctk.CTkLabel(right_frame, text="Profile:", font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED).pack(side="right")
 
-        self.combo_network = ctk.CTkComboBox(right_frame, variable=self.selected_network_var, values=["Default"], width=120, height=36, fg_color=C_BG, corner_radius=8, border_color=C_BORDER, justify="center")
+        self.combo_network = ctk.CTkComboBox(right_frame, variable=self.selected_network_var, values=["Default"], width=130, height=36, fg_color=C_BG, corner_radius=8, border_color=C_BORDER, justify="center")
         self.combo_network.pack(side="right", padx=(5, 15))
         ctk.CTkLabel(right_frame, text="Network:", font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED).pack(side="right")
 
