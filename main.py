@@ -4,7 +4,6 @@
 import sys
 import ctypes
 import platform
-from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QIcon
 
@@ -20,10 +19,9 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 def main():
     sys.excepthook = handle_exception
     
-    # Critical: Enforce Windows Native Taskbar Grouping Override BEFORE Qt Application Boot
     if platform.system() == "Windows":
         try:
-            myappid = f"bluefalcon.dnsbenchmark.pro.v{APP_VERSION}"
+            myappid = f"bluefalcon.dnsbenchmark.pro.async.v{APP_VERSION}"
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except Exception:
             pass

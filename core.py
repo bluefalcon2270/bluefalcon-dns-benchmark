@@ -3,20 +3,18 @@
 # ==========================================
 import sys
 import time
-import socket
+import asyncio
 import subprocess
 import ctypes
 import logging
 from pathlib import Path
-import dns.resolver
+import dns.asyncresolver
 
-APP_VERSION = "2.6"
+APP_VERSION = "3.0"
 
-# Setup Paths - Force CWD so files are always created next to the execution context
 BASE_DIR = Path.cwd()
 LOG_FILE = BASE_DIR / "bluefalcon-app.log"
 
-# Configure Logging
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] [%(levelname)s] %(message)s",
@@ -31,7 +29,6 @@ logger = logging.getLogger("BlueFalconCore")
 class AppUtils:
     @staticmethod
     def get_resource_path(relative_path: str) -> Path:
-        """ Resolves absolute path to bundled resources for PyInstaller. """
         try:
             base_path = Path(sys._MEIPASS)
         except Exception:
@@ -40,7 +37,6 @@ class AppUtils:
 
     @staticmethod
     def is_admin() -> bool:
-        """ Check if the application has Windows Administrator privileges. """
         try:
             return ctypes.windll.shell32.IsUserAnAdmin() != 0
         except Exception:
@@ -48,12 +44,7 @@ class AppUtils:
 
     @staticmethod
     def check_internet_connection() -> bool:
-        """ Pre-flight check to see if the user is completely offline. """
-        try:
-            socket.create_connection(("1.1.1.1", 53), timeout=2.0)
-            return True
-        except OSError:
-            return False
+        return True
 
 class NetworkUtils:
     @staticmethod
@@ -71,48 +62,40 @@ class NetworkUtils:
         except Exception as e:
             logger.warning(f"Failed to fetch System DNS via PowerShell: {e}")
                 
-        try:
-            resolver = dns.resolver.Resolver()
-            return resolver.nameservers
-        except Exception as e:
-            logger.warning(f"Failed to fetch System DNS via fallback: {e}")
-            return ["1.1.1.1"]
+        return ["1.1.1.1"]
 
     @staticmethod
-    def tcp_test(ip: str, port: int, timeout: float) -> tuple[bool, str | int]:
+    async def tcp_test_async(ip: str, port: int, timeout: float) -> tuple[bool, str | int]:
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
             t0 = time.time()
-            sock.connect((ip, port))
+            conn = asyncio.open_connection(ip, port)
+            reader, writer = await asyncio.wait_for(conn, timeout=timeout)
             dt = (time.time() - t0) * 1000
-            sock.close()
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
             return True, round(dt)
-        except socket.timeout: 
+        except asyncio.TimeoutError:
             return False, "TCP Timeout"
-        except ConnectionRefusedError: 
-            return False, "Refused"
-        except OSError as e:
-            if e.errno == 10051: return False, "Unreachable"
-            return False, "TCP Err"
         except Exception: 
             return False, "TCP Err"
 
     @staticmethod
-    def test_dns_domain(dns_ip: str, domain: str, timeout: float) -> tuple[bool, str, int]:
-        resolver = dns.resolver.Resolver(configure=False)
+    async def test_dns_domain_async(dns_ip: str, domain: str, timeout: float) -> tuple[bool, str, int]:
+        resolver = dns.asyncresolver.Resolver(configure=False)
         resolver.nameservers = [dns_ip]
-        
         resolver.timeout = float(timeout)
         resolver.lifetime = float(timeout)
         
         try:
-            ans = resolver.resolve(domain, "A", lifetime=timeout)
+            ans = await resolver.resolve(domain, "A")
             ips = [x.to_text() for x in ans]
             if not ips: 
                 return False, "No IP", 0
                 
-            ok, t_res = NetworkUtils.tcp_test(ips[0], 443, timeout)
+            ok, t_res = await NetworkUtils.tcp_test_async(ips[0], 443, timeout)
             if ok: 
                 return True, f"{t_res} ms", t_res
             else: 
@@ -121,9 +104,8 @@ class NetworkUtils:
         except dns.resolver.NXDOMAIN: return False, "NXDOMAIN", 0
         except dns.resolver.NoAnswer: return False, "No Answer", 0
         except dns.resolver.NoNameservers: return False, "ServFail", 0
-        except dns.exception.Timeout: return False, "DNS Timeout", 0
+        except (dns.exception.Timeout, asyncio.TimeoutError): return False, "DNS Timeout", 0
         except Exception: return False, "?", 0
-
 
 class ConfigManager:
     @staticmethod
@@ -168,23 +150,19 @@ class ConfigManager:
 
         for fname in filenames:
             data = ConfigManager.load_single_profile(fname)
-            
             for dns in data.get("dns_list", []):
                 ip_only = dns.split()[0] if dns else ""
                 if ip_only and ip_only not in seen_dns:
                     seen_dns.add(ip_only)
                     merged_data["dns_list"].append(dns)
-                    
             for dom in data.get("domain_list", []):
                 if dom not in seen_domains:
                     seen_domains.add(dom)
                     merged_data["domain_list"].append(dom)
-
             for net in data.get("network_list", []):
                 if net not in seen_networks:
                     seen_networks.add(net)
                     merged_data["network_list"].append(net)
-                    
         return merged_data
 
     @staticmethod
@@ -198,7 +176,6 @@ class ConfigManager:
                 for item in data.get("domain_list", []): f.write(f"{item}\n")
                 f.write("\n\nNetwork:\n")
                 for item in data.get("network_list", []): f.write(f"{item}\n")
-            logger.info(f"Successfully saved profile text file directly to: {filepath}")
         except Exception as e:
             logger.error(f"Failed to save profile {filename}: {e}")
 
@@ -210,10 +187,9 @@ class ConfigManager:
             if not parts: continue
             ip = parts[0]
             name = parts[1] if len(parts) > 1 else ""
-            is_system = ip in system_dns_list
             parsed.append({
                 "ip": ip, "name": name, "row_id": f"row_{idx}", 
-                "is_system": is_system
+                "is_system": ip in system_dns_list
             })
         return parsed
 
