@@ -18,7 +18,7 @@ from core import NetworkUtils, ConfigManager
 # ==========================================
 # Application Configuration & Constants
 # ==========================================
-APP_VERSION = "39.0"
+APP_VERSION = "40.0"
 
 # Material Design 3 (Google) Dark Theme Colors
 C_BG = "#131314"            # Deep App Background
@@ -352,10 +352,12 @@ class ModernDNSApp(ctk.CTk):
 
             lbl_row_num = ctk.CTkLabel(self.table_scroll.inner_frame, text=str(row_index + 1), font=("Segoe UI", 13, "bold"), text_color=C_TEXT_MUTED)
             lbl_row_num.grid(row=grid_row, column=0, padx=4, pady=8)
+            self.ui_cells[row_id]["_row_num"] = lbl_row_num
 
             srv_frame = ctk.CTkFrame(self.table_scroll.inner_frame, fg_color="transparent", cursor="hand2")
             srv_frame.grid(row=grid_row, column=2, padx=10, pady=8, sticky="w")
             srv_frame.bind("<Double-Button-1>", lambda e, ip=info["ip"]: self.copy_to_clipboard(ip))
+            self.ui_cells[row_id]["_srv_frame"] = srv_frame
             
             lbl_ip = ctk.CTkLabel(srv_frame, text=info["ip"], font=("Segoe UI", 14, "bold"), text_color=C_PRIMARY)
             lbl_ip.pack(side="left")
@@ -389,7 +391,9 @@ class ModernDNSApp(ctk.CTk):
                 lbl_cell.grid(row=grid_row, column=actual_col, padx=4, pady=8)
                 self.ui_cells[row_id][domain] = lbl_cell
 
-            ctk.CTkFrame(self.table_scroll.inner_frame, height=1, fg_color=C_BG).grid(row=grid_row + 1, column=0, columnspan=total_cols, sticky="ew", padx=10)
+            separator = ctk.CTkFrame(self.table_scroll.inner_frame, height=1, fg_color=C_BG)
+            separator.grid(row=grid_row + 1, column=0, columnspan=total_cols, sticky="ew", padx=10)
+            self.ui_cells[row_id]["_separator"] = separator
 
     def toggle_scan(self):
         if self.display_mode == "history":
@@ -447,47 +451,56 @@ class ModernDNSApp(ctk.CTk):
         self.update_queue.put(("DONE", None, None, None, None))
 
     def process_queue(self):
-        while not self.update_queue.empty():
-            try:
-                row_id, domain, success, text, time_val = self.update_queue.get_nowait()
-                
-                if row_id == "DONE":
-                    self.is_scanning = False
-                    self.btn_start.configure(state="normal", text="🚀 Start Benchmark", fg_color=C_PRIMARY_BG, text_color=C_TEXT_MAIN, hover_color="#0842A0")
-                    self.combo_network.configure(state="normal")
-                    self.progress_bar.set(1.0)
-                    self.lbl_progress_text.configure(text=f"{self.total_tasks} / {self.total_tasks}")
+        try:
+            processed_tasks = 0
+            while not self.update_queue.empty() and processed_tasks < 100:
+                try:
+                    row_id, domain, success, text, time_val = self.update_queue.get_nowait()
                     
-                    if self.stop_event.is_set():
-                        self.lbl_status.configure(text="Scan Aborted", text_color=C_ERROR)
+                    if row_id == "DONE":
+                        self.is_scanning = False
+                        self.btn_start.configure(state="normal", text="🚀 Start Benchmark", fg_color=C_PRIMARY_BG, text_color=C_TEXT_MAIN, hover_color="#0842A0")
+                        self.combo_network.configure(state="normal")
+                        self.progress_bar.set(1.0)
+                        self.lbl_progress_text.configure(text=f"{self.total_tasks} / {self.total_tasks}")
+                        
+                        if self.stop_event.is_set():
+                            self.lbl_status.configure(text="Scan Aborted", text_color=C_ERROR)
+                        else:
+                            self.lbl_status.configure(text="Saving history...", text_color=C_SUCCESS)
+                            self._save_to_history()
+                            self.lbl_status.configure(text="Scan Complete", text_color=C_SUCCESS)
+                        
+                        for r_id in self.ui_cells:
+                            avg, err_text = self.calculate_metrics(r_id)
+                            if "_grade" in self.ui_cells[r_id] and err_text != "-": 
+                                err_val = int(err_text)
+                                c = C_SUCCESS if err_val == 0 else (C_WARNING if err_val <= 2 else C_ERROR)
+                                self.ui_cells[r_id]["_grade"].configure(text=err_text, text_color=c)
+                            if "_avg" in self.ui_cells[r_id]: 
+                                self.ui_cells[r_id]["_avg"].configure(text=avg)
                     else:
-                        self.lbl_status.configure(text="Saving history...", text_color=C_SUCCESS)
-                        self._save_to_history()
-                        self.lbl_status.configure(text="Scan Complete", text_color=C_SUCCESS)
-                    
-                    for r_id in self.ui_cells:
-                        avg, err_text = self.calculate_metrics(r_id)
-                        if "_grade" in self.ui_cells[r_id] and err_text != "-": 
-                            err_val = int(err_text)
-                            c = C_SUCCESS if err_val == 0 else (C_WARNING if err_val <= 2 else C_ERROR)
-                            self.ui_cells[r_id]["_grade"].configure(text=err_text, text_color=c)
-                        if "_avg" in self.ui_cells[r_id]: 
-                            self.ui_cells[r_id]["_avg"].configure(text=avg)
-                else:
-                    self.completed_tasks += 1
-                    if self.total_tasks > 0:
-                        self.progress_bar.set(self.completed_tasks / self.total_tasks)
-                        self.lbl_progress_text.configure(text=f"{self.completed_tasks} / {self.total_tasks}")
+                        self.completed_tasks += 1
+                        if self.total_tasks > 0:
+                            self.progress_bar.set(self.completed_tasks / self.total_tasks)
+                            self.lbl_progress_text.configure(text=f"{self.completed_tasks} / {self.total_tasks}")
 
-                    self.results_data[row_id][domain] = {"success": success, "text": text, "time": time_val}
+                        self.results_data[row_id][domain] = {"success": success, "text": text, "time": time_val}
 
-                    if row_id in self.ui_cells and domain in self.ui_cells[row_id]:
-                        lbl = self.ui_cells[row_id][domain]
-                        if success: lbl.configure(text=text, text_color=C_SUCCESS)
-                        else: lbl.configure(text=text, text_color=C_ERROR, font=("Segoe UI", 12))
-
-            except queue.Empty: break
-        self.after(50, self.process_queue)
+                        if row_id in self.ui_cells and domain in self.ui_cells[row_id]:
+                            lbl = self.ui_cells[row_id][domain]
+                            if success: lbl.configure(text=text, text_color=C_SUCCESS)
+                            else: lbl.configure(text=text, text_color=C_ERROR, font=("Segoe UI", 12))
+                            
+                except queue.Empty:
+                    break
+                except Exception as e:
+                    print(f"Task processing error: {e}")
+                
+                processed_tasks += 1
+        finally:
+            # Ensures the loop ALWAYS schedules itself again regardless of errors
+            self.after(50, self.process_queue)
 
     def _save_to_history(self):
         network = self.selected_network_var.get()
@@ -541,8 +554,35 @@ class ModernDNSApp(ctk.CTk):
 
             self.dns_list.sort(key=get_sort_key)
             self.is_sorted = True
-            self.build_grid()
             
+            # Smart Re-Gridding instead of Destroying (Fixes Tkinter freeze/hard lock issue)
+            for row_index, info in enumerate(self.dns_list):
+                grid_row = (row_index * 2) + 1
+                row_id = info["row_id"]
+                
+                if row_id in self.ui_cells:
+                    if "_row_num" in self.ui_cells[row_id]:
+                        self.ui_cells[row_id]["_row_num"].grid(row=grid_row, column=0)
+                        self.ui_cells[row_id]["_row_num"].configure(text=str(row_index + 1))
+                        
+                    if "_srv_frame" in self.ui_cells[row_id]:
+                        self.ui_cells[row_id]["_srv_frame"].grid(row=grid_row, column=2)
+                        
+                    if "_grade" in self.ui_cells[row_id]:
+                        self.ui_cells[row_id]["_grade"].grid(row=grid_row, column=4)
+                        
+                    if "_avg" in self.ui_cells[row_id]:
+                        self.ui_cells[row_id]["_avg"].grid(row=grid_row, column=6)
+                        
+                    for col_idx, domain in enumerate(self.domains, start=4):
+                        actual_col = col_idx * 2
+                        if domain in self.ui_cells[row_id]:
+                            self.ui_cells[row_id][domain].grid(row=grid_row, column=actual_col)
+                            
+                    if "_separator" in self.ui_cells[row_id]:
+                        self.ui_cells[row_id]["_separator"].grid(row=grid_row + 1, column=0)
+            
+            # Recalculate metrics for UI update
             for row_id, dom_data in self.results_data.items():
                 if row_id in self.ui_cells:
                     avg, err_text = self.calculate_metrics(row_id)
