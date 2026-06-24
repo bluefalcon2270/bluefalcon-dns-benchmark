@@ -14,7 +14,7 @@
 
 A modern, fast dashboard designed to evaluate DNS server performance across multiple domains simultaneously. Craft custom configuration profiles for different networks (ISPs), leverage up to 1,000 concurrent worker threads for instant results, and track historical latency data through the integrated analytics manager. Designed with a sleek Material Design 3 (Google) Dark Theme.
 
-![alt text](image.png)
+![alt text](image-1.png)
 
 ## 🚀 How to Use
 
